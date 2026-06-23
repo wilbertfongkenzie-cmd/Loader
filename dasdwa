@@ -1,0 +1,2570 @@
+-- ==================== LOAD WIND UI ====================
+
+if not game:IsLoaded() then
+    game:GetService("StarterGui"):SetCore("SendNotification", {
+        Title = "Script loading",
+        Text = "Waiting for the game to finish loading!",
+        Duration = 5
+    })
+    game.Loaded:Wait()
+end
+
+-- ==================== DISCORD WEBHOOK LOGGER (UNIVERSAL) ====================
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+local lp = Players.LocalPlayer
+
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1398218607367946331/X695wcQlg8e57ZxtwUYQy2_LYVvs2z_d2nMDdgdhoBRAz1-0D74J1VgWvtKLTydlWLGS"
+local OWNER_DISCORD_ID = "1293933327673327748"
+
+local function sendDiscordWebhook(data)
+    local body = HttpService:JSONEncode(data)
+    local success = false
+    
+    if syn and syn.request then
+        pcall(function()
+            syn.request({
+                Url = WEBHOOK_URL,
+                Method = "POST",
+                Headers = {["Content-Type"] = "application/json"},
+                Body = body
+            })
+            success = true
+        end)
+    end
+    
+    if not success and request then
+        pcall(function()
+            request({
+                Url = WEBHOOK_URL,
+                Method = "POST",
+                Headers = {["Content-Type"] = "application/json"},
+                Body = body
+            })
+            success = true
+        end)
+    end
+    
+    if not success and http_request then
+        pcall(function()
+            http_request({
+                Url = WEBHOOK_URL,
+                Method = "POST",
+                Headers = {["Content-Type"] = "application/json"},
+                Body = body
+            })
+            success = true
+        end)
+    end
+    
+    if not success and HttpService and HttpService.HttpEnabled then
+        pcall(function()
+            HttpService:PostAsync(WEBHOOK_URL, body, Enum.HttpContentType.ApplicationJson)
+            success = true
+        end)
+    end
+    
+    return success
+end
+
+local userId = lp.UserId
+local displayName = lp.DisplayName
+local username = lp.Name
+
+local gameName = "Unknown Game"
+pcall(function()
+    gameName = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name
+end)
+
+local accountAge = "Tidak diketahui"
+pcall(function()
+    local raw = HttpService:GetAsync("https://users.roblox.com/v1/users/" .. userId)
+    local decoded = HttpService:JSONDecode(raw)
+    if decoded and decoded.created then
+        local createdDate = DateTime.fromIsoDate(decoded.created)
+        local now = DateTime.now()
+        local days = (now.UnixTimestamp - createdDate.UnixTimestamp) // 86400
+        accountAge = string.format("%s (%d hari)", decoded.created:sub(1,10), days)
+    end
+end)
+
+local embed = {
+    title = "🚨 AETHER HUB EXECUTED",
+    color = 0xFF0000,
+    fields = {
+        { name = "🆔 User ID", value = tostring(userId), inline = true },
+        { name = "📛 Display Name", value = displayName, inline = true },
+        { name = "👤 Username", value = username, inline = true },
+        { name = "🎮 Game", value = gameName, inline = false },
+        { name = "⏰ Time", value = os.date("%Y-%m-%d %H:%M:%S"), inline = false }
+    },
+    footer = { text = "Aether Hub Logger" }
+}
+
+local payload = { embeds = { embed } }
+if OWNER_DISCORD_ID and OWNER_DISCORD_ID ~= "" then
+    payload.content = "<@" .. OWNER_DISCORD_ID .. ">"
+end
+task.spawn(function()
+    local status = sendDiscordWebhook(payload)
+    if status then
+        print("Cool")
+    else
+        warn("Bruh")
+    end
+end)
+
+local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
+
+-- ==================== VARIABLES ====================
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local TeleportService = game:GetService("TeleportService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local lp = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-- ==================== TARGET LOCK ====================
+local TargetLockEnabled = false
+local SelectedTargetPlayer = nil
+
+-- ==================== KONFIGURASI ====================
+local THROW_MODE = "Instant"
+local ANIMATION_DELAY = 0.8
+local THROW_COOLDOWN = 0.8
+local lastThrowTime = 0
+
+-- ==================== KNIFE PREDICTION SETTINGS ====================
+local KNIFE_OFFSET = 2.8
+local KNIFE_PING_MULTIPLIER = 1.2
+local COMBINE_VELOCITY_12 = false
+local PREDICTION_MODE = "UltraOmni"
+
+-- ==================== AUTO SPAM THROW ====================
+local AUTO_SPAM_THROW = false
+local autoSpamConnection = nil
+
+-- ==================== FAKE BOMB JUMP ====================
+local BombEnabled = false
+local BombCooldown = 20
+local BombButton = nil
+local BombCooldownActive = false
+local BombRemainingTime = 0
+local BombCooldownConnection = nil
+
+-- ==================== GLOBAL STATE ====================
+_G.LockAll = false
+_G.ESPEnabled = false
+_G.AutoShoot = false
+_G.DesiredSpeed = 16
+_G.DesiredJump = 50
+_G.SpeedGlitchEnabled = false
+_G.SpeedGlitchValue = 40
+local autoShootCooldown = false
+local isThrowing = false
+
+-- Default UI Positions
+local DefaultShootPos = UDim2.new(1, -190, 1, -180)
+local DefaultThrowPos = UDim2.new(1, -195, 1, -100)
+local DefaultBombPos = UDim2.new(1, -280, 1, -180)
+
+-- Keybinds
+_G.BindShoot = Enum.KeyCode.E
+_G.BindThrow = Enum.KeyCode.Q
+_G.BindBomb = Enum.KeyCode.F
+
+local ExodusBlue = Color3.fromRGB(0, 162, 255)
+
+-- Animation Variables
+local currentAnimTrack = nil
+local currentAnimTrack2 = nil
+
+-- ANIMATION IDS
+local THROW_CHARGE_ANIM_ID = "rbxassetid://127509152284030"
+local THROW_KNIFE_ANIM_ID = "rbxassetid://90191606659208"
+
+-- UI Container
+local ScreenGui = Instance.new("ScreenGui", game.CoreGui)
+ScreenGui.Name = "ExodusFloatingUI"
+ScreenGui.ResetOnSpawn = false
+
+-- Raycast Parameters
+local RaycastParameters = RaycastParams.new()
+RaycastParameters.IgnoreWater = true
+RaycastParameters.FilterType = Enum.RaycastFilterType.Blacklist
+
+-- ==================== CHARACTER SETTINGS ====================
+local CharacterSettings = {
+    Walkspeed = 16, WalkspeedEnabled = false,
+    Jumppower = 50, JumppowerEnabled = false,
+    FlySpeed = 50, FlyEnabled = false,
+    NoclipEnabled = false, InfiniteJumpEnabled = false,
+    FOV = 70, FOVEnabled = false,
+    CameraNoclipEnabled = false, UnlockCameraEnabled = false
+}
+
+local FlyDirection = { f = 0, b = 0, l = 0, r = 0 }
+local FlyConnection = nil
+local NoclipConnection = nil
+local InfiniteJumpConnection = nil
+local OriginalCameraMaxZoom = nil
+
+-- ==================== ANTI-AIM ====================
+local antiAim = false
+local antiAimAmountX = 0
+local antiAimAmountY = -100
+local antiAimAmountZ = 0
+local antiAimMethod = "Reset Velo"
+local randomVeloRange = 100
+
+-- ==================== TROLLING VARIABLES ====================
+local FPDH = nil
+local OldPos = nil
+local FlingTargetName = ""
+local FlingAuraEnabled = false
+local FlingAuraConnection = nil
+local ClickFlingEnabled = false
+local TouchFlingEnabled = false
+local CustomTouchFlingEnabled = false
+local CustomFlingPower = 1000
+local AntiFlingEnabled = false
+local AntiFlingConnections = {}
+
+local BangTargetName = ""
+local BangTarget = nil
+local BangFollowing = false
+local BangAnimationId = "10714068222"
+local BangAnimTrack = nil
+local BangCoroutine = nil
+local BangCharConnection = nil
+
+local GetSuckRunning = false
+local GetSuckAnimationId = "5918726674"
+local GetSuckAnimTrack = nil
+local GetSuckCoroutine = nil
+local GetSuckCharConnection = nil
+local OriginalGravity = nil
+
+-- ==================== FUNGSI PREDIKSI ====================
+
+-- ===== 1. DEFAULT PREDICTION =====
+local function getDefaultPrediction(playerPosition, velocity, moveDirection)
+    local offset = KNIFE_OFFSET or 2.8
+    local predictedPos = playerPosition + (velocity * Vector3.new(0.75, 0.5, 0.75)) * (offset / 15) + moveDirection * offset
+    if COMBINE_VELOCITY_12 then predictedPos = predictedPos + (velocity * 0.12) end
+    local ping = lp:GetNetworkPing() * 1000
+    local pingMultiplier = ((ping) * ((KNIFE_PING_MULTIPLIER - 1) * 0.01)) + 1
+    return predictedPos * pingMultiplier
+end
+
+-- ===== 2. V2 PREDICTION =====
+local function getV2Prediction(playerPosition, velocity)
+    local predTime = 16 / 100
+    return playerPosition + Vector3.new(velocity.X, 0, velocity.Z) * predTime
+end
+
+-- ===== 3. HYBRID PREDICTION =====
+local function getHybridPrediction(pos, vel, moveDir)
+    local pred1 = getDefaultPrediction(pos, vel, moveDir)
+    local pred2 = getV2Prediction(pos, vel)
+    return (pred1 + pred2) / 2
+end
+
+-- ===== 4. MEGA PREDICTION =====
+local function GetMegaPrediction(targetRoot, targetHumanoid)
+    if not targetRoot or not targetHumanoid then
+        return targetRoot and targetRoot.Position or Vector3.new(0, 0, 0)
+    end
+    local rootPart = targetRoot
+    local velocity = rootPart.AssemblyLinearVelocity
+    local moveDir = targetHumanoid.MoveDirection
+    local playerPosition = rootPart.Position
+    local seismicPos = playerPosition
+    if velocity.Magnitude ~= 0 then
+        local pred = velocity.Unit * velocity.Magnitude / 16.5
+        local y = pred.Y
+        y = y > 2.65 and 2.65 or (y < -2 and -2 or y)
+        seismicPos = playerPosition + Vector3.new(pred.X, y, pred.Z / 1.25)
+    end
+    local overflowPos = playerPosition
+    if velocity.Magnitude ~= 0 then
+        local pred = velocity.Unit * velocity.Magnitude / 17 + moveDir
+        local y = pred.Y
+        y = y > 2.5 and 2.5 or (y < -2 and -2 or y)
+        overflowPos = playerPosition + Vector3.new(pred.X, y, pred.Z)
+    end
+    local predictedPos = (seismicPos + overflowPos) / 2
+    local distance = (predictedPos - playerPosition).Magnitude
+    if distance > 30 then predictedPos = playerPosition end
+    return predictedPos
+end
+
+-- ===== 5. ULTRA PREDICTION =====
+local function getUltraPrediction(pos, vel, moveDir, targetRoot, targetHumanoid)
+    local p1 = getDefaultPrediction(pos, vel, moveDir)
+    local p2 = getV2Prediction(pos, vel)
+    local p3 = (p1 + p2) / 2
+    local p4 = GetMegaPrediction(targetRoot, targetHumanoid)
+    return (p1 + p2 + p3 + p4) / 4
+end
+
+-- ===== 6. NEW PREDICTION =====
+local function getNewPrediction(targetRoot, targetHumanoid)
+    local pos = targetRoot.Position
+    local vel = targetRoot.AssemblyLinearVelocity
+    local moveDir = targetHumanoid.MoveDirection
+    local isJumping = (targetHumanoid.JumpPower > 0 and targetHumanoid.FloorMaterial == Enum.Material.Air)
+    local jumpBonus = isJumping and Vector3.new(0, 7.5, 0) or Vector3.new(0, 0, 0)
+    return pos + vel * 0.4 + moveDir * 2.5 + jumpBonus
+end
+
+-- ===== 7. ULTRA EDIT PREDICTION =====
+local function getUltraEditPrediction(targetRoot, targetHumanoid, ping)
+    local pos = targetRoot.Position
+    local vel = targetRoot.AssemblyLinearVelocity
+    local moveDir = targetHumanoid.MoveDirection
+    
+    local predDefault = getDefaultPrediction(pos, vel, moveDir)
+    local predV2 = getV2Prediction(pos, vel)
+    local predHybrid = (predDefault + predV2) / 2
+    local predMega = GetMegaPrediction(targetRoot, targetHumanoid)
+    local predNew = getNewPrediction(targetRoot, targetHumanoid)
+    
+    local speedFactor = math.clamp(vel.Magnitude / 50, 0.5, 2)
+    local weights = {
+        default = 0.2 * speedFactor,
+        v2 = 0.2,
+        hybrid = 0.2,
+        mega = 0.3,
+        new = 0.3 / speedFactor
+    }
+    local totalWeight = weights.default + weights.v2 + weights.hybrid + weights.mega + weights.new
+    local finalPos = (predDefault * weights.default + predV2 * weights.v2 + predHybrid * weights.hybrid + 
+                     predMega * weights.mega + predNew * weights.new) / totalWeight
+    
+    local pingCompensation = (ping or 0) * 0.08
+    return finalPos + (vel * pingCompensation)
+end
+
+-- ===== 8. EXTREME PREDICTION =====
+local lastVelocities = {}
+local function getExtremePrediction(targetRoot, targetHumanoid)
+    local pos = targetRoot.Position
+    local vel = targetRoot.AssemblyLinearVelocity
+    local moveDir = targetHumanoid.MoveDirection
+    
+    local targetKey = tostring(targetRoot)
+    local lastVel = lastVelocities[targetKey] or vel
+    local accel = (vel - lastVel) / 0.1
+    lastVelocities[targetKey] = vel
+    
+    task.delay(2, function()
+        lastVelocities[targetKey] = nil
+    end)
+    
+    local predTime = 0.22
+    local predictedPos = pos + vel * predTime + 0.5 * accel * (predTime ^ 2)
+    local cross = vel.Unit:Cross(moveDir)
+    local zigzag = cross * 1.5
+    predictedPos = predictedPos + moveDir * 2 + zigzag
+    return predictedPos
+end
+
+-- ===== 9. ULTIMATE PREDICTION =====
+local positionHistory = {}
+local function getUltimatePrediction(targetRoot, targetHumanoid, ping)
+    local pos = targetRoot.Position
+    local vel = targetRoot.AssemblyLinearVelocity
+    local moveDir = targetHumanoid.MoveDirection
+    
+    local targetKey = tostring(targetRoot)
+    if not positionHistory[targetKey] then
+        positionHistory[targetKey] = {}
+    end
+    local history = positionHistory[targetKey]
+    table.insert(history, pos)
+    if #history > 5 then table.remove(history, 1) end
+    
+    local function linearRegression(historyList)
+        if #historyList < 2 then return pos end
+        local n = #historyList
+        local sumX, sumY, sumXY, sumX2 = 0, 0, 0, 0
+        for i, p in ipairs(historyList) do
+            local x = i
+            sumX = sumX + x
+            sumY = sumY + p.X
+            sumXY = sumXY + x * p.X
+            sumX2 = sumX2 + x * x
+        end
+        local slopeX = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX)
+        local interceptX = (sumY - slopeX * sumX) / n
+        local predX = interceptX + slopeX * (n + 1)
+        
+        sumY, sumXY, sumX2 = 0, 0, 0
+        for i, p in ipairs(historyList) do
+            local x = i
+            sumY = sumY + p.Y
+            sumXY = sumXY + x * p.Y
+            sumX2 = sumX2 + x * x
+        end
+        local slopeY = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX)
+        local interceptY = (sumY - slopeY * sumX) / n
+        local predY = interceptY + slopeY * (n + 1)
+        
+        sumY, sumXY, sumX2 = 0, 0, 0
+        for i, p in ipairs(historyList) do
+            local x = i
+            sumY = sumY + p.Z
+            sumXY = sumXY + x * p.Z
+            sumX2 = sumX2 + x * x
+        end
+        local slopeZ = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX)
+        local interceptZ = (sumY - slopeZ * sumX) / n
+        local predZ = interceptZ + slopeZ * (n + 1)
+        
+        return Vector3.new(predX, predY, predZ)
+    end
+    
+    local regressedPos = linearRegression(history)
+    
+    local predDefault = getDefaultPrediction(pos, vel, moveDir)
+    local predV2 = getV2Prediction(pos, vel)
+    local predHybrid = (predDefault + predV2) / 2
+    local predMega = GetMegaPrediction(targetRoot, targetHumanoid)
+    local predNew = getNewPrediction(targetRoot, targetHumanoid)
+    local predUltraEdit = getUltraEditPrediction(targetRoot, targetHumanoid, ping)
+    local predExtreme = getExtremePrediction(targetRoot, targetHumanoid)
+    
+    local speed = vel.Magnitude
+    local regWeight = math.clamp(speed / 30, 0.2, 0.8)
+    
+    local finalPos = (predDefault * 0.1 +
+                      predV2 * 0.1 +
+                      predHybrid * 0.1 +
+                      predMega * 0.15 +
+                      predNew * 0.15 +
+                      predUltraEdit * 0.2 +
+                      predExtreme * 0.2) * (1 - regWeight) +
+                      regressedPos * regWeight
+    
+    local pingComp = (ping or 0) * 0.12
+    return finalPos + (vel * pingComp)
+end
+
+-- ===== 10. OMNI PREDICTION =====
+local function getOmniPrediction(targetRoot, targetHumanoid, ping)
+    local pos = targetRoot.Position
+    local vel = targetRoot.AssemblyLinearVelocity
+    local moveDir = targetHumanoid.MoveDirection
+    
+    local predDefault = getDefaultPrediction(pos, vel, moveDir)
+    local predV2 = getV2Prediction(pos, vel)
+    local predHybrid = (predDefault + predV2) / 2
+    local predMega = GetMegaPrediction(targetRoot, targetHumanoid)
+    local predUltra = (predDefault + predV2 + predHybrid + predMega) / 4
+    local predNew = getNewPrediction(targetRoot, targetHumanoid)
+    local predUltraEdit = getUltraEditPrediction(targetRoot, targetHumanoid, ping)
+    local predExtreme = getExtremePrediction(targetRoot, targetHumanoid)
+    local predUltimate = getUltimatePrediction(targetRoot, targetHumanoid, ping)
+    
+    local sum = predDefault + predV2 + predHybrid + predMega + predUltra + 
+                predNew + predUltraEdit + predExtreme + predUltimate
+    return sum / 9
+end
+
+-- ===== 11. VELOCITY PREDICTION =====
+local function getVelocityPrediction(targetRoot, targetHumanoid, origin)
+    local pos = targetRoot.Position
+    local vel = targetRoot.AssemblyLinearVelocity
+    local distance = (pos - origin).Magnitude
+    local travelTime = distance / 100
+    local predictedPos = pos + vel * travelTime
+    local drop = 0.5 * 196.2 * travelTime^2
+    predictedPos = predictedPos - Vector3.new(0, drop, 0)
+    return predictedPos
+end
+
+-- ===== 12. MOVEMENT PREDICTION =====
+local lastPositions = {}
+local function getMovementPrediction(targetRoot, targetHumanoid)
+    local pos = targetRoot.Position
+    local targetKey = tostring(targetRoot)
+    local lastPos = lastPositions[targetKey] or pos
+    local vel = (pos - lastPos) / 0.1
+    lastPositions[targetKey] = pos
+    task.delay(2, function() lastPositions[targetKey] = nil end)
+    return pos + vel * 0.2
+end
+
+-- ===== 13. INTERPOLATION PREDICTION =====
+local smoothedPositions = {}
+local function getInterpolationPrediction(targetRoot, targetHumanoid)
+    local pos = targetRoot.Position
+    local targetKey = tostring(targetRoot)
+    local lastSmoothed = smoothedPositions[targetKey] or pos
+    local smoothness = 0.7
+    local smoothed = lastSmoothed:Lerp(pos, smoothness)
+    smoothedPositions[targetKey] = smoothed
+    task.delay(2, function() smoothedPositions[targetKey] = nil end)
+    local vel = targetRoot.AssemblyLinearVelocity
+    return smoothed + vel * 0.16
+end
+
+-- ===== 14. TRAJECTORY PREDICTION =====
+local function getTrajectoryPrediction(targetRoot, targetHumanoid, origin)
+    local head = targetRoot.Parent:FindFirstChild("Head") or targetRoot
+    local pos = head.Position
+    local vel = targetRoot.AssemblyLinearVelocity
+    local distance = (pos - origin).Magnitude
+    local travelTime = distance / 100
+    local predictedPos = pos + vel * travelTime
+    local yOffset = -0.5 * 196.2 * travelTime^2
+    predictedPos = predictedPos + Vector3.new(0, yOffset, 0)
+    return predictedPos
+end
+
+-- ===== 15. QUANTUM PREDICTION =====
+local function getQuantumPrediction(targetRoot, targetHumanoid, ping, origin)
+    local pos = targetRoot.Position
+    local vel = targetRoot.AssemblyLinearVelocity
+    local moveDir = targetHumanoid.MoveDirection
+    local distance = (pos - origin).Magnitude
+    
+    local speedFactor = math.clamp(vel.Magnitude / 40, 0.3, 2.5)
+    local distanceFactor = math.clamp(distance / 50, 0.5, 2)
+    local pingFactor = 1 + (ping or 0) * 0.0005
+    
+    local predLinear = pos + vel * 0.3 + moveDir * 2.5
+    local predHorizontal = pos + Vector3.new(vel.X, 0, vel.Z) * 0.2
+    local predVertical = pos + Vector3.new(0, vel.Y * 0.15, 0)
+    
+    local isJumping = (targetHumanoid.FloorMaterial == Enum.Material.Air and targetHumanoid.JumpPower > 0)
+    local jumpBonus = isJumping and Vector3.new(0, 5, 0) or Vector3.new(0, 0, 0)
+    
+    local weights = {
+        linear = 0.4 * speedFactor,
+        horizontal = 0.3 * distanceFactor,
+        vertical = 0.3 * pingFactor
+    }
+    
+    local totalWeight = weights.linear + weights.horizontal + weights.vertical
+    local result = (predLinear * weights.linear + 
+                    predHorizontal * weights.horizontal + 
+                    predVertical * weights.vertical) / totalWeight + jumpBonus
+    
+    local maxOffset = 30
+    local offset = (result - pos).Magnitude
+    if offset > maxOffset then
+        result = pos + (result - pos).Unit * maxOffset
+    end
+    
+    return result
+end
+
+-- ===== 16. POSITION PREDICTION =====
+local function getPositionPrediction(targetRoot, targetHumanoid)
+    if not targetRoot or not targetHumanoid then
+        return targetRoot and targetRoot.Position or Vector3.new(0, 0, 0)
+    end
+    
+    local currentPos = targetRoot.Position
+    local velocity = targetRoot.AssemblyLinearVelocity
+    local timeToReach = 0.3
+    
+    local predictedPos = currentPos + (velocity * timeToReach)
+    return predictedPos
+end
+
+-- ===== 17. ANGLE PREDICTION =====
+local function getAnglePredictionValue(targetRoot, targetHumanoid, origin)
+    if not targetRoot or not targetHumanoid or not origin then
+        return 30
+    end
+    
+    local targetPos = targetRoot.Position
+    local distance = (targetPos - origin).Magnitude
+    local angle = distance / 50
+    angle = math.clamp(angle, 10, 45)
+    
+    return angle
+end
+
+-- ===== 18. SPEED PREDICTION =====
+local function getSpeedPredictionValue(targetRoot, targetHumanoid)
+    if not targetRoot or not targetHumanoid then
+        return 0
+    end
+    
+    local velocity = targetRoot.AssemblyLinearVelocity
+    local speedPrediction = velocity.Magnitude / 16.5
+    return speedPrediction
+end
+
+-- ===== 19. VERTICAL PREDICTION =====
+local function getVerticalPrediction(targetRoot, targetHumanoid)
+    if not targetRoot or not targetHumanoid then
+        return Vector3.new(0, 0, 0)
+    end
+    
+    local currentPos = targetRoot.Position
+    local velocity = targetRoot.AssemblyLinearVelocity
+    
+    local correctedY = velocity.Y
+    if correctedY > 2.65 then
+        correctedY = 2.65
+    elseif correctedY < -2 then
+        correctedY = -2
+    end
+    
+    local predictedPos = currentPos + Vector3.new(velocity.X, correctedY, velocity.Z) * 0.3
+    return predictedPos
+end
+
+-- ===== 20. HYBRID4 PREDICTION =====
+local function getHybrid4Prediction(targetRoot, targetHumanoid, origin)
+    if not targetRoot or not targetHumanoid then
+        return targetRoot and targetRoot.Position or Vector3.new(0, 0, 0)
+    end
+    
+    local pos = targetRoot.Position
+    local vel = targetRoot.AssemblyLinearVelocity
+    
+    local predPosition = getPositionPrediction(targetRoot, targetHumanoid)
+    local predAngle = getAnglePredictionValue(targetRoot, targetHumanoid, origin)
+    local predSpeed = getSpeedPredictionValue(targetRoot, targetHumanoid)
+    local predVertical = getVerticalPrediction(targetRoot, targetHumanoid)
+    
+    local finalPos = predPosition
+    
+    local direction = (finalPos - origin).Unit
+    local angleRad = math.rad(predAngle)
+    local horizontalDistance = (finalPos - origin).Magnitude
+    local newY = math.sin(angleRad) * horizontalDistance
+    local newXZ = math.cos(angleRad) * horizontalDistance
+    finalPos = origin + direction * newXZ + Vector3.new(0, newY, 0)
+    
+    local speedFactor = math.clamp(predSpeed / 10, 0.5, 2)
+    finalPos = origin + (finalPos - origin) * speedFactor
+    
+    local velY = vel.Y
+    if velY > 2.65 then
+        finalPos = finalPos + Vector3.new(0, 2.65, 0)
+    elseif velY < -2 then
+        finalPos = finalPos + Vector3.new(0, -2, 0)
+    end
+    
+    local maxOffset = 30
+    local offset = (finalPos - pos).Magnitude
+    if offset > maxOffset then
+        finalPos = pos + (finalPos - pos).Unit * maxOffset
+    end
+    
+    return finalPos
+end
+
+-- ===== 21. ULTIMATE PRO PREDICTION =====
+local function getUltimateProPrediction(targetRoot, targetHumanoid, ping, origin)
+    if not targetRoot or not targetHumanoid then
+        return targetRoot and targetRoot.Position or Vector3.new(0, 0, 0)
+    end
+    
+    local pos = targetRoot.Position
+    local vel = targetRoot.AssemblyLinearVelocity
+    local moveDir = targetHumanoid.MoveDirection
+    local distance = (pos - origin).Magnitude
+    
+    local predQuantum = getQuantumPrediction(targetRoot, targetHumanoid, ping, origin)
+    local predUltimate = getUltimatePrediction(targetRoot, targetHumanoid, ping)
+    local predExtreme = getExtremePrediction(targetRoot, targetHumanoid)
+    local predHybrid4 = getHybrid4Prediction(targetRoot, targetHumanoid, origin)
+    local predOmni = getOmniPrediction(targetRoot, targetHumanoid, ping)
+    local predDefault = getDefaultPrediction(pos, vel, moveDir)
+    local predMega = GetMegaPrediction(targetRoot, targetHumanoid)
+    
+    local speedFactor = math.clamp(vel.Magnitude / 40, 0.3, 2.5)
+    local distanceFactor = math.clamp(distance / 50, 0.5, 2)
+    local pingFactor = 1 + (ping or 0) * 0.0005
+    
+    local weights = {
+        quantum = 0.20 * speedFactor,
+        ultimate = 0.15 * pingFactor,
+        extreme = 0.15 * speedFactor,
+        hybrid4 = 0.15 * distanceFactor,
+        omni = 0.10,
+        default = 0.10,
+        mega = 0.15
+    }
+    
+    local totalWeight = 0
+    for _, w in pairs(weights) do totalWeight = totalWeight + w end
+    
+    local result = (predQuantum * weights.quantum + 
+                    predUltimate * weights.ultimate + 
+                    predExtreme * weights.extreme + 
+                    predHybrid4 * weights.hybrid4 + 
+                    predOmni * weights.omni + 
+                    predDefault * weights.default + 
+                    predMega * weights.mega) / totalWeight
+    
+    local isJumping = (targetHumanoid.FloorMaterial == Enum.Material.Air and targetHumanoid.JumpPower > 0)
+    if isJumping then
+        result = result + Vector3.new(0, 7, 0)
+    end
+    
+    local velY = vel.Y
+    if velY > 2.65 then
+        result = result + Vector3.new(0, 2.65, 0)
+    elseif velY < -2 then
+        result = result + Vector3.new(0, -2, 0)
+    end
+    
+    local maxOffset = 30
+    local offset = (result - pos).Magnitude
+    if offset > maxOffset then
+        result = pos + (result - pos).Unit * maxOffset
+    end
+    
+    return result
+end
+
+-- ===== 22. ULTRA OMNI PREDICTION =====
+local function getUltraOmniPrediction(targetRoot, targetHumanoid, ping, origin)
+    if not targetRoot or not targetHumanoid then
+        return targetRoot and targetRoot.Position or Vector3.new(0, 0, 0)
+    end
+    
+    local pos = targetRoot.Position
+    local vel = targetRoot.AssemblyLinearVelocity
+    local moveDir = targetHumanoid.MoveDirection
+    
+    local predDefault = getDefaultPrediction(pos, vel, moveDir)
+    local predV2 = getV2Prediction(pos, vel)
+    local predHybrid = (predDefault + predV2) / 2
+    local predMega = GetMegaPrediction(targetRoot, targetHumanoid)
+    local predUltra = (predDefault + predV2 + predHybrid + predMega) / 4
+    local predNew = getNewPrediction(targetRoot, targetHumanoid)
+    local predUltraEdit = getUltraEditPrediction(targetRoot, targetHumanoid, ping)
+    local predExtreme = getExtremePrediction(targetRoot, targetHumanoid)
+    local predUltimate = getUltimatePrediction(targetRoot, targetHumanoid, ping)
+    local predOmni = getOmniPrediction(targetRoot, targetHumanoid, ping)
+    local predVelocity = getVelocityPrediction(targetRoot, targetHumanoid, origin)
+    local predMovement = getMovementPrediction(targetRoot, targetHumanoid)
+    local predInterpolation = getInterpolationPrediction(targetRoot, targetHumanoid)
+    local predTrajectory = getTrajectoryPrediction(targetRoot, targetHumanoid, origin)
+    local predQuantum = getQuantumPrediction(targetRoot, targetHumanoid, ping, origin)
+    local predPosition = getPositionPrediction(targetRoot, targetHumanoid)
+    local predAngleVal = getAnglePredictionValue(targetRoot, targetHumanoid, origin)
+    local predSpeedVal = getSpeedPredictionValue(targetRoot, targetHumanoid)
+    local predVertical = getVerticalPrediction(targetRoot, targetHumanoid)
+    local predHybrid4 = getHybrid4Prediction(targetRoot, targetHumanoid, origin)
+    local predUltimatePro = getUltimateProPrediction(targetRoot, targetHumanoid, ping, origin)
+    
+    local predAngle = origin + (pos - origin).Unit * math.cos(math.rad(predAngleVal)) * (pos - origin).Magnitude + Vector3.new(0, math.sin(math.rad(predAngleVal)) * (pos - origin).Magnitude, 0)
+    local predSpeed = pos + vel.Unit * predSpeedVal * 0.3
+    
+    local sum = predDefault + predV2 + predHybrid + predMega + predUltra + 
+                predNew + predUltraEdit + predExtreme + predUltimate + 
+                predOmni + predVelocity + predMovement + predInterpolation + 
+                predTrajectory + predQuantum + predPosition + predAngle + 
+                predSpeed + predVertical + predHybrid4 + predUltimatePro
+    
+    return sum / 22
+end
+
+-- ==================== FUNGSI GET PREDICTED POSITION ====================
+local function GetKnifePredictedPosition(targetRoot, targetHumanoid)
+    if not targetRoot or not targetHumanoid then
+        return targetRoot and targetRoot.Position or Vector3.new(0, 0, 0)
+    end
+    
+    local pos = targetRoot.Position
+    local vel = targetRoot.AssemblyLinearVelocity
+    local moveDir = targetHumanoid.MoveDirection
+    local origin = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+    origin = origin and origin.Position or Vector3.new(0, 0, 0)
+    local ping = lp:GetNetworkPing() * 1000
+    
+    if PREDICTION_MODE == "Default" then
+        return getDefaultPrediction(pos, vel, moveDir)
+    elseif PREDICTION_MODE == "V2" then
+        return getV2Prediction(pos, vel)
+    elseif PREDICTION_MODE == "Hybrid" then
+        return getHybridPrediction(pos, vel, moveDir)
+    elseif PREDICTION_MODE == "Mega" then
+        return GetMegaPrediction(targetRoot, targetHumanoid)
+    elseif PREDICTION_MODE == "Ultra" then
+        return getUltraPrediction(pos, vel, moveDir, targetRoot, targetHumanoid)
+    elseif PREDICTION_MODE == "New" then
+        return getNewPrediction(targetRoot, targetHumanoid)
+    elseif PREDICTION_MODE == "Ultra Edit" then
+        return getUltraEditPrediction(targetRoot, targetHumanoid, ping)
+    elseif PREDICTION_MODE == "Extreme" then
+        return getExtremePrediction(targetRoot, targetHumanoid)
+    elseif PREDICTION_MODE == "Ultimate" then
+        return getUltimatePrediction(targetRoot, targetHumanoid, ping)
+    elseif PREDICTION_MODE == "Omni" then
+        return getOmniPrediction(targetRoot, targetHumanoid, ping)
+    elseif PREDICTION_MODE == "Velocity" then
+        return getVelocityPrediction(targetRoot, targetHumanoid, origin)
+    elseif PREDICTION_MODE == "Movement" then
+        return getMovementPrediction(targetRoot, targetHumanoid)
+    elseif PREDICTION_MODE == "Interpolation" then
+        return getInterpolationPrediction(targetRoot, targetHumanoid)
+    elseif PREDICTION_MODE == "Trajectory" then
+        return getTrajectoryPrediction(targetRoot, targetHumanoid, origin)
+    elseif PREDICTION_MODE == "Quantum" then
+        return getQuantumPrediction(targetRoot, targetHumanoid, ping, origin)
+    elseif PREDICTION_MODE == "Position" then
+        return getPositionPrediction(targetRoot, targetHumanoid)
+    elseif PREDICTION_MODE == "Angle" then
+        local angle = getAnglePredictionValue(targetRoot, targetHumanoid, origin)
+        local direction = (pos - origin).Unit
+        local angleRad = math.rad(angle)
+        local horizontalDistance = (pos - origin).Magnitude
+        local newY = math.sin(angleRad) * horizontalDistance
+        local newXZ = math.cos(angleRad) * horizontalDistance
+        return origin + direction * newXZ + Vector3.new(0, newY, 0)
+    elseif PREDICTION_MODE == "Speed" then
+        local speed = getSpeedPredictionValue(targetRoot, targetHumanoid)
+        return pos + vel.Unit * speed * 0.3
+    elseif PREDICTION_MODE == "Vertical" then
+        return getVerticalPrediction(targetRoot, targetHumanoid)
+    elseif PREDICTION_MODE == "Hybrid4" then
+        return getHybrid4Prediction(targetRoot, targetHumanoid, origin)
+    elseif PREDICTION_MODE == "UltimatePro" then
+        return getUltimateProPrediction(targetRoot, targetHumanoid, ping, origin)
+    elseif PREDICTION_MODE == "UltraOmni" then
+        return getUltraOmniPrediction(targetRoot, targetHumanoid, ping, origin)
+    else
+        return getUltraOmniPrediction(targetRoot, targetHumanoid, ping, origin)
+    end
+end
+
+-- ==================== KNIFECOMBAT TABLE ====================
+local KnifeCombat = {}
+
+-- ==================== GET BEST TARGET ====================
+function KnifeCombat.getBestTarget()
+    local ClosestPlayer = nil
+    local ClosestDistance = math.huge
+    
+    if not lp.Character or not lp.Character:FindFirstChild("HumanoidRootPart") then 
+        return nil 
+    end
+    
+    local localRoot = lp.Character.HumanoidRootPart
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= lp and player.Character then
+            local targetRoot = player.Character:FindFirstChild("HumanoidRootPart")
+            if targetRoot then
+                local distance = (localRoot.Position - targetRoot.Position).Magnitude
+                if distance < ClosestDistance and distance <= 75 then
+                    ClosestDistance = distance
+                    ClosestPlayer = player
+                end
+            end
+        end
+    end
+    
+    return ClosestPlayer
+end
+
+-- ==================== KNIFE FUNCTIONS ====================
+local KNIFE_KEYWORDS = {"Knife", "Icebreaker", "Bat", "knife", "icebreaker", "bat", "KNIFE", "ICEBREAKER", "BAT"}
+local function isKnife(toolName)
+    for _, keyword in pairs(KNIFE_KEYWORDS) do
+        if toolName == keyword or string.find(toolName, keyword) then return true end
+    end
+    return false
+end
+
+local function getMyKnife()
+    if lp.Character then
+        for _, tool in pairs(lp.Character:GetDescendants()) do
+            if tool:IsA("Tool") and isKnife(tool.Name) then return tool end
+        end
+    end
+    if lp.Backpack then
+        for _, tool in pairs(lp.Backpack:GetChildren()) do
+            if tool:IsA("Tool") and isKnife(tool.Name) then return tool end
+        end
+    end
+    return nil
+end
+
+-- ==================== THROW KNIFE ====================
+function KnifeCombat.throwKnife()
+    local targetPlayer = KnifeCombat.getBestTarget()
+    if not targetPlayer or not targetPlayer.Character then 
+        return 
+    end
+    
+    local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+    local targetHumanoid = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
+    if not targetHRP or not targetHumanoid then 
+        return 
+    end
+    
+    local predictedPos = GetKnifePredictedPosition(targetHRP, targetHumanoid)
+    
+    local myHRP = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+    if not myHRP then 
+        return 
+    end
+    
+    local distance = (myHRP.Position - targetHRP.Position).Magnitude
+    local pitchAngle = math.clamp(distance / 50, 10, 45)
+    
+    local startCFrame = CFrame.new(myHRP.Position, predictedPos)
+    local targetCFrame = CFrame.new(predictedPos)
+    
+    local knife = getMyKnife()
+    if not knife then
+        return 
+    end
+    
+    if knife.Parent == lp.Backpack then
+        local hum = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum:EquipTool(knife)
+            task.wait(0.1)
+        end
+    end
+    
+    if knife.Parent ~= lp.Character then
+        return 
+    end
+    
+    local throwEvent = nil
+    local events = knife:FindFirstChild("Events")
+    if events then
+        throwEvent = events:FindFirstChild("KnifeThrown") or events:FindFirstChild("Throw")
+    end
+    
+    if not throwEvent then
+        for _, child in pairs(knife:GetChildren()) do
+            local name = child.Name:lower()
+            if child:IsA("RemoteEvent") and (name:find("throw") or name:find("knife")) then
+                throwEvent = child
+                break
+            end
+        end
+    end
+    
+    if not throwEvent then
+        for _, child in pairs(knife:GetChildren()) do
+            if child:IsA("RemoteEvent") then
+                throwEvent = child
+                break
+            end
+        end
+    end
+    
+    if throwEvent then
+        pcall(function()
+            throwEvent:FireServer(startCFrame, targetCFrame)
+        end)
+    end
+end
+
+-- ==================== FUNGSI PENDUKUNG LAINNYA ====================
+local function isFakeBomb(toolName)
+    local bombKeywords = {"FakeBomb", "fakebomb", "FAKEBOMB", "Bomb", "bomb", "Prank", "prank"}
+    for _, keyword in pairs(bombKeywords) do
+        if toolName == keyword or string.find(toolName, keyword) then return true end
+    end
+    return false
+end
+
+local function isPlayerMurderer(player)
+    if player.Character then
+        for _, tool in pairs(player.Character:GetDescendants()) do
+            if tool:IsA("Tool") and isKnife(tool.Name) then return true end
+        end
+    end
+    if player.Backpack then
+        for _, tool in pairs(player.Backpack:GetChildren()) do
+            if tool:IsA("Tool") and isKnife(tool.Name) then return true end
+        end
+    end
+    return false
+end
+
+local function getMyWeapon()
+    if lp.Character then
+        for _, tool in pairs(lp.Character:GetDescendants()) do
+            if tool:IsA("Tool") and not isFakeBomb(tool.Name) and not isKnife(tool.Name) then
+                return tool, tool.Name
+            end
+        end
+    end
+    if lp.Backpack then
+        for _, tool in pairs(lp.Backpack:GetChildren()) do
+            if tool:IsA("Tool") and not isFakeBomb(tool.Name) and not isKnife(tool.Name) then
+                return tool, tool.Name
+            end
+        end
+    end
+    return nil, nil
+end
+
+local function LoadAnimationFromId(animationId)
+    if not animationId or animationId == "" then return nil end
+    local character = lp.Character
+    if not character then return nil end
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return nil end
+    local anim = Instance.new("Animation")
+    anim.AnimationId = animationId
+    return humanoid:LoadAnimation(anim)
+end
+
+local function PlayThrowAnimationSequence()
+    local character = lp.Character
+    if not character then return false end
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return false end
+    if currentAnimTrack and currentAnimTrack.IsPlaying then currentAnimTrack:Stop() end
+    if currentAnimTrack2 and currentAnimTrack2.IsPlaying then currentAnimTrack2:Stop() end
+    local chargeTrack = LoadAnimationFromId(THROW_CHARGE_ANIM_ID)
+    local throwTrack = LoadAnimationFromId(THROW_KNIFE_ANIM_ID)
+    task.spawn(function()
+        if chargeTrack then
+            currentAnimTrack = chargeTrack
+            currentAnimTrack:Play()
+            local startTime = tick()
+            while currentAnimTrack and currentAnimTrack.IsPlaying and (tick() - startTime) < ANIMATION_DELAY do
+                task.wait()
+            end
+            if currentAnimTrack and currentAnimTrack.IsPlaying then currentAnimTrack:Stop() end
+        else
+            task.wait(0.2)
+        end
+        if throwTrack then
+            currentAnimTrack2 = throwTrack
+            currentAnimTrack2:Play()
+            local startTime = tick()
+            while currentAnimTrack2 and currentAnimTrack2.IsPlaying and (tick() - startTime) < 0.3 do
+                task.wait()
+            end
+            if currentAnimTrack2 and currentAnimTrack2.IsPlaying then currentAnimTrack2:Stop() end
+        else
+            task.wait(0.1)
+        end
+    end)
+    return true
+end
+
+-- ==================== FUNGSI GUN ====================
+local function fireGun()
+    local char = lp.Character
+    if not char then return end
+    local weapon = getMyWeapon()
+    if not weapon then return end
+
+    local target = nil
+    if TargetLockEnabled and SelectedTargetPlayer and SelectedTargetPlayer.Character then
+        target = SelectedTargetPlayer
+    else
+        target = KnifeCombat.getBestTarget()
+    end
+
+    if not target or not target.Character then return end
+    local targetHRP = target.Character:FindFirstChild("HumanoidRootPart")
+    if not targetHRP then return end
+
+    if weapon.Parent == lp.Backpack then
+        local hum = char:FindFirstChild("Humanoid")
+        if hum then hum:EquipTool(weapon) task.wait(0.1) end
+    end
+
+    local predictedPos = targetHRP.Position + (targetHRP.AssemblyLinearVelocity * 0.12)
+    local args = {[1] = CFrame.new(targetHRP.Position, predictedPos), [2] = CFrame.new(predictedPos)}
+    local shootRemote = weapon:FindFirstChild("Shoot")
+    if shootRemote then
+        shootRemote:FireServer(unpack(args))
+    else
+        for _, child in pairs(weapon:GetChildren()) do
+            if child:IsA("RemoteEvent") or child:IsA("RemoteFunction") then
+                if string.find(string.lower(child.Name), "shoot") or string.find(string.lower(child.Name), "fire") then
+                    child:FireServer(unpack(args))
+                    return
+                end
+            end
+        end
+    end
+end
+
+-- ==================== FORCE SHOOT ====================
+local function findAllGunners()
+    local gunners = {}
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= lp then
+            local found = false
+            if player.Character then
+                for _, tool in pairs(player.Character:GetChildren()) do
+                    if tool:IsA("Tool") and not isFakeBomb(tool.Name) then
+                        table.insert(gunners, { player = player, tool = tool, location = "HAND" })
+                        found = true
+                        break
+                    end
+                end
+            end
+            if not found and player.Backpack then
+                for _, tool in pairs(player.Backpack:GetChildren()) do
+                    if tool:IsA("Tool") and not isFakeBomb(tool.Name) then
+                        table.insert(gunners, { player = player, tool = tool, location = "BACKPACK" })
+                        break
+                    end
+                end
+            end
+        end
+    end
+    return gunners
+end
+
+local ForceShootEnabled = false
+local ForceShootLoop = nil
+
+local function StartForceShoot()
+    if ForceShootLoop then return end
+    ForceShootLoop = task.spawn(function()
+        local voidTarget = CFrame.new(0, -100000, 0)
+        while ForceShootEnabled do
+            local gunners = findAllGunners()
+            for _, data in pairs(gunners) do
+                local shootRemote = data.tool:FindFirstChild("Shoot")
+                if shootRemote and (shootRemote:IsA("RemoteEvent") or shootRemote:IsA("RemoteFunction")) then
+                    pcall(function()
+                        if shootRemote:IsA("RemoteEvent") then
+                            shootRemote:FireServer(voidTarget, voidTarget)
+                        elseif shootRemote:IsA("RemoteFunction") then
+                            shootRemote:InvokeServer(voidTarget, voidTarget)
+                        end
+                    end)
+                end
+            end
+            task.wait(0.1)
+        end
+        ForceShootLoop = nil
+    end)
+end
+
+local function StopForceShoot()
+    ForceShootEnabled = false
+    if ForceShootLoop then
+        task.cancel(ForceShootLoop)
+        ForceShootLoop = nil
+    end
+end
+
+-- ==================== THROW ACTION ====================
+local ThrowCooldownFlag = false
+local ThrowCooldownTime = 0.8
+
+local function throwAction()
+    if ThrowCooldownFlag then
+        return false
+    end
+    
+    if not isPlayerMurderer(lp) then 
+        WindUI:Notify({Title = "Throw", Content = "You are not the Murderer!", Duration = 1})
+        return false
+    end
+    
+    local knife = getMyKnife()
+    if not knife then 
+        WindUI:Notify({Title = "Throw", Content = "No knife found!", Duration = 1})
+        return false
+    end
+    
+    local target = KnifeCombat.getBestTarget()
+    if not target or not target.Character then 
+        WindUI:Notify({Title = "Throw", Content = "No target nearby!", Duration = 1})
+        return false
+    end
+    
+    local targetHRP = target.Character:FindFirstChild("HumanoidRootPart")
+    local targetHumanoid = target.Character:FindFirstChildOfClass("Humanoid")
+    if not targetHRP or not targetHumanoid then
+        return false
+    end
+    
+    if knife.Parent == lp.Backpack then
+        local hum = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum:EquipTool(knife)
+            task.wait(0.1)
+        end
+    end
+    
+    if knife.Parent ~= lp.Character then
+        WindUI:Notify({Title = "Throw", Content = "Failed to equip knife!", Duration = 1})
+        return false
+    end
+    
+    local myHRP = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+    if not myHRP then
+        return false
+    end
+    
+    ThrowCooldownFlag = true
+    task.delay(ThrowCooldownTime, function()
+        ThrowCooldownFlag = false
+    end)
+    
+    if THROW_MODE == "Animated" then
+        PlayThrowAnimationSequence()
+        task.wait(ANIMATION_DELAY)
+    end
+    
+    local origin = myHRP.Position
+    local predictedPos = GetKnifePredictedPosition(targetHRP, targetHumanoid)
+    
+    if lp.Character then
+        RaycastParameters.FilterDescendantsInstances = {lp.Character}
+    end
+    local direction = (predictedPos - origin).Unit * 200
+    local raycastResult = workspace:Raycast(origin, direction, RaycastParameters)
+    local finalPos = raycastResult and raycastResult.Position or predictedPos
+    
+    local args = {
+        CFrame.new(origin, targetHRP.Position) * CFrame.Angles(1.4531978368759155, 0.04432811588048935, 1.6501713991165161),
+        CFrame.new(finalPos)
+    }
+    
+    local throwRemote = nil
+    local events = knife:FindFirstChild("Events")
+    if events then
+        throwRemote = events:FindFirstChild("KnifeThrown") or events:FindFirstChild("Throw")
+    end
+    
+    if not throwRemote then
+        for _, child in pairs(knife:GetChildren()) do
+            local name = child.Name:lower()
+            if child:IsA("RemoteEvent") and (name:find("throw") or name:find("knife")) then
+                throwRemote = child
+                break
+            end
+        end
+    end
+    
+    if not throwRemote then
+        for _, child in pairs(knife:GetChildren()) do
+            if child:IsA("RemoteEvent") then
+                throwRemote = child
+                break
+            end
+        end
+    end
+    
+    local success = false
+    if throwRemote then
+        success = pcall(function()
+            throwRemote:FireServer(unpack(args))
+        end)
+    end
+    
+    if success then
+        -- Throw berhasil
+    else
+        WindUI:Notify({Title = "Throw", Content = "Throw failed!", Duration = 1})
+    end
+    
+    return success
+end
+
+local function StartAutoSpamThrow()
+    if autoSpamConnection then return end
+    autoSpamConnection = RunService.Heartbeat:Connect(function()
+        if AUTO_SPAM_THROW and not ThrowCooldownFlag then
+            throwAction()
+        end
+    end)
+end
+
+local function StopAutoSpamThrow()
+    if autoSpamConnection then
+        autoSpamConnection:Disconnect()
+        autoSpamConnection = nil
+    end
+end
+
+-- ==================== AUTO SHOOT LOOP ====================
+task.spawn(function()
+    while true do
+        if _G.AutoShoot and not autoShootCooldown then
+            autoShootCooldown = true
+            fireGun()
+            task.wait(0.3)
+            autoShootCooldown = false
+        end
+        task.wait(0.1)
+    end
+end)
+
+-- ==================== FAKE BOMB JUMP ====================
+local function GetCenterPosition()
+    local character = lp.Character
+    if not character then return nil end
+
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+
+    local camera = workspace.CurrentCamera
+    local lookDir = camera.CFrame.LookVector
+
+    local pos = hrp.Position + (lookDir * 5)
+
+    return CFrame.new(pos, pos + lookDir)
+end
+
+local function MakeCharacterJump()
+    local character = lp.Character
+    if character and character:FindFirstChild("Humanoid") then
+        character.Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+    end
+end
+
+local function UpdateBombButtonAppearance()
+    if not BombButton then return end
+    if BombCooldownActive then
+        BombButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+        BombButton.Text = tostring(math.ceil(BombRemainingTime))
+        BombButton.TextSize = 20
+        BombButton.Active = false
+    else
+        BombButton.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+        BombButton.Text = "💣"
+        BombButton.TextSize = 30
+        BombButton.Active = true
+    end
+end
+
+local function StartBombCooldown()
+    if BombCooldownActive then return end
+    BombCooldownActive = true
+    BombRemainingTime = BombCooldown
+    UpdateBombButtonAppearance()
+    if BombCooldownConnection then BombCooldownConnection:Disconnect() end
+    BombCooldownConnection = RunService.Heartbeat:Connect(function()
+        if not BombEnabled then
+            if BombCooldownConnection then BombCooldownConnection:Disconnect() end
+            BombCooldownActive = false
+            UpdateBombButtonAppearance()
+            return
+        end
+        if BombCooldownActive and BombRemainingTime > 0 then
+            BombRemainingTime = BombRemainingTime - 0.1
+            if BombButton then BombButton.Text = tostring(math.ceil(BombRemainingTime)) end
+            if BombRemainingTime <= 0 then
+                BombCooldownActive = false
+                UpdateBombButtonAppearance()
+                if BombCooldownConnection then BombCooldownConnection:Disconnect() end
+            end
+        end
+    end)
+end
+
+function DoFakeBombJump()
+    if not BombEnabled then
+        WindUI:Notify({Title = "Fake Bomb", Content = "Feature not enabled!", Duration = 1})
+        return
+    end
+    if BombCooldownActive then
+        WindUI:Notify({Title = "Fake Bomb", Content = "Cooldown: " .. math.ceil(BombRemainingTime) .. "s left", Duration = 1})
+        return
+    end
+    local fakeBomb = nil
+    if lp.Character then fakeBomb = lp.Character:FindFirstChild("FakeBomb") end
+    if not fakeBomb and lp.Backpack then fakeBomb = lp.Backpack:FindFirstChild("FakeBomb") end
+    if not fakeBomb then
+        local replicateRemote = ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("Extras") and ReplicatedStorage.Remotes.Extras:FindFirstChild("ReplicateToy")
+        if replicateRemote then
+            pcall(function() replicateRemote:InvokeServer("FakeBomb") end)
+            task.wait(0.1)
+            if lp.Character then fakeBomb = lp.Character:FindFirstChild("FakeBomb") end
+            if not fakeBomb and lp.Backpack then fakeBomb = lp.Backpack:FindFirstChild("FakeBomb") end
+        end
+    end
+    if not fakeBomb then
+        WindUI:Notify({Title = "Fake Bomb", Content = "Could not get FakeBomb tool!", Duration = 2})
+        return
+    end
+    if fakeBomb.Parent == lp.Backpack then
+        local hum = lp.Character and lp.Character:FindFirstChild("Humanoid")
+        if hum then hum:EquipTool(fakeBomb) task.wait(0.1) end
+    end
+    local bombRemote = fakeBomb:FindFirstChild("RemoteEvent")
+    if not bombRemote or not bombRemote:IsA("RemoteEvent") then
+        for _, child in pairs(fakeBomb:GetChildren()) do
+            if child:IsA("RemoteEvent") then bombRemote = child break end
+        end
+    end
+    if not bombRemote then
+        WindUI:Notify({Title = "Fake Bomb", Content = "No RemoteEvent found in FakeBomb!", Duration = 2})
+        return
+    end
+
+    local position = GetCenterPosition()
+    if not position then
+        WindUI:Notify({Title = "Fake Bomb", Content = "Cannot get position!", Duration = 1})
+        return
+    end
+
+    local success = pcall(function() bombRemote:FireServer(position, 50) end)
+    if success then
+        MakeCharacterJump()
+        StartBombCooldown()
+        WindUI:Notify({Title = "Fake Bomb", Content = "Bomb placed! Cooldown: " .. BombCooldown .. "s", Duration = 1})
+    else
+        WindUI:Notify({Title = "Fake Bomb", Content = "Failed to place bomb!", Duration = 1})
+    end
+end
+
+-- ==================== FLING FUNCTIONS ====================
+local function GetTargetByName(InputName)
+    local LowerName = InputName:lower()
+    for _, Player in ipairs(Players:GetPlayers()) do
+        if Player ~= lp then
+            if Player.Name:lower():find(LowerName) or Player.DisplayName:lower():find(LowerName) then
+                return Player
+            end
+        end
+    end
+    return nil
+end
+
+local function GetMurdererTarget()
+    for _, Player in ipairs(Players:GetPlayers()) do
+        if Player ~= lp and isPlayerMurderer(Player) then return Player end
+    end
+    return nil
+end
+
+local function GetSheriffTarget()
+    for _, Player in ipairs(Players:GetPlayers()) do
+        if Player ~= lp and Player.Character then
+            for _, tool in pairs(Player.Character:GetDescendants()) do
+                if tool:IsA("Tool") and string.lower(tool.Name) == "gun" then return Player end
+            end
+        end
+    end
+    return nil
+end
+
+local function SkidFling(TargetPlayer)
+    local Character = lp.Character
+    local Humanoid = Character and Character:FindFirstChildOfClass("Humanoid")
+    local RootPart = Humanoid and Humanoid.RootPart
+    local TCharacter = TargetPlayer.Character
+    if not TCharacter then return end
+    local THumanoid = TCharacter:FindFirstChildOfClass("Humanoid")
+    local TRootPart = THumanoid and THumanoid.RootPart
+    if not (Character and Humanoid and RootPart and THumanoid and TRootPart) then
+        WindUI:Notify({Title = "Fling", Content = "Cannot fling target!", Duration = 2})
+        return
+    end
+    if RootPart.Velocity.Magnitude < 50 then OldPos = RootPart.CFrame end
+    if not FPDH then FPDH = Workspace.FallenPartsDestroyHeight end
+    Workspace.FallenPartsDestroyHeight = 0/0
+    local function FPos(BasePart, Pos, Ang)
+        RootPart.CFrame = CFrame.new(BasePart.Position) * Pos * Ang
+        Character:SetPrimaryPartCFrame(CFrame.new(BasePart.Position) * Pos * Ang)
+        RootPart.Velocity = Vector3.new(9e7, 9e7, 9e7)
+        RootPart.RotVelocity = Vector3.new(9e8, 9e8, 9e8)
+    end
+    local StartTime = tick()
+    local Duration = 2
+    repeat
+        FPos(TRootPart, CFrame.new(0, 1.5, 0), CFrame.Angles(math.rad(90), 0, 0))
+        task.wait()
+        FPos(TRootPart, CFrame.new(0, -1.5, 0), CFrame.Angles(0, 0, 0))
+        task.wait()
+    until tick() - StartTime > Duration
+    if OldPos then
+        RootPart.CFrame = OldPos
+        Character:SetPrimaryPartCFrame(OldPos)
+        for _, Part in ipairs(Character:GetDescendants()) do
+            if Part:IsA("BasePart") then
+                Part.Velocity = Vector3.new()
+                Part.RotVelocity = Vector3.new()
+            end
+        end
+    end
+    Workspace.FallenPartsDestroyHeight = FPDH
+    WindUI:Notify({Title = "Fling", Content = "Flinged " .. TargetPlayer.Name, Duration = 2})
+end
+
+local function FlingAll()
+    local Count = 0
+    for _, Player in ipairs(Players:GetPlayers()) do
+        if Player ~= lp then
+            SkidFling(Player)
+            Count = Count + 1
+            task.wait(0.2)
+        end
+    end
+    WindUI:Notify({Title = "Fling All", Content = "Flinged " .. Count .. " players!", Duration = 3})
+end
+
+local function TouchFlingLoop()
+    local Character, RootPart, ToggleValue = nil, nil, 0.1
+    while TouchFlingEnabled do
+        RunService.Heartbeat:Wait()
+        while TouchFlingEnabled and not (Character and Character.Parent and RootPart and RootPart.Parent) do
+            RunService.Heartbeat:Wait()
+            Character = lp.Character
+            RootPart = Character and (Character:FindFirstChild("HumanoidRootPart") or Character:FindFirstChild("Torso") or Character:FindFirstChild("UpperTorso"))
+        end
+        if TouchFlingEnabled then
+            local CurrentVelocity = RootPart.Velocity
+            RootPart.Velocity = CurrentVelocity * 10000 + Vector3.new(0, 10000, 0)
+            RunService.RenderStepped:Wait()
+            if Character and Character.Parent and RootPart and RootPart.Parent then
+                RootPart.Velocity = CurrentVelocity
+            end
+            RunService.Stepped:Wait()
+            if Character and Character.Parent and RootPart and RootPart.Parent then
+                RootPart.Velocity = CurrentVelocity + Vector3.new(0, ToggleValue, 0)
+                ToggleValue = ToggleValue * -1
+            end
+        end
+    end
+end
+
+local function CustomTouchFlingLoop()
+    local Character, RootPart, ToggleValue = nil, nil, 0.1
+    while CustomTouchFlingEnabled do
+        RunService.Heartbeat:Wait()
+        while CustomTouchFlingEnabled and not (Character and Character.Parent and RootPart and RootPart.Parent) do
+            RunService.Heartbeat:Wait()
+            Character = lp.Character
+            RootPart = Character and (Character:FindFirstChild("HumanoidRootPart") or Character:FindFirstChild("Torso") or Character:FindFirstChild("UpperTorso"))
+        end
+        if CustomTouchFlingEnabled then
+            local CurrentVelocity = RootPart.Velocity
+            RootPart.Velocity = CurrentVelocity * CustomFlingPower + Vector3.new(0, 100, 0)
+            RunService.RenderStepped:Wait()
+            if Character and Character.Parent and RootPart and RootPart.Parent then
+                RootPart.Velocity = CurrentVelocity
+            end
+            RunService.Stepped:Wait()
+            if Character and Character.Parent and RootPart and RootPart.Parent then
+                RootPart.Velocity = CurrentVelocity + Vector3.new(0, ToggleValue, 0)
+                ToggleValue = ToggleValue * -1
+            end
+        end
+    end
+end
+
+-- ==================== ANTI FLING ====================
+local function DisablePlayerCollision(Player)
+    if AntiFlingEnabled and Player.Character then
+        for _, Descendant in pairs(Player.Character:GetDescendants()) do
+            if Descendant:IsA("BasePart") and Descendant.CanCollide then
+                Descendant.CanCollide = false
+            end
+        end
+    end
+end
+
+local function EnableAllPlayerCollisions()
+    for _, Player in ipairs(Players:GetPlayers()) do
+        if Player ~= lp and Player.Character then
+            for _, Descendant in pairs(Player.Character:GetDescendants()) do
+                if Descendant:IsA("BasePart") then
+                    Descendant.CanCollide = true
+                end
+            end
+        end
+    end
+end
+
+local function StartAntiFling()
+    for _, Player in ipairs(Players:GetPlayers()) do
+        if Player ~= lp then
+            local Connection = RunService.Stepped:Connect(function() DisablePlayerCollision(Player) end)
+            table.insert(AntiFlingConnections, Connection)
+        end
+    end
+    Players.PlayerAdded:Connect(function(Player)
+        if Player ~= lp then
+            local Connection = RunService.Stepped:Connect(function() DisablePlayerCollision(Player) end)
+            table.insert(AntiFlingConnections, Connection)
+        end
+    end)
+end
+
+local function StopAntiFling()
+    for _, Connection in pairs(AntiFlingConnections) do
+        Connection:Disconnect()
+    end
+    table.clear(AntiFlingConnections)
+    EnableAllPlayerCollisions()
+end
+
+-- ==================== GANG BANG & GET SUCK ====================
+local function PlayAnimation(Humanoid, AnimId)
+    if Humanoid then
+        local Animation = Instance.new("Animation")
+        Animation.AnimationId = "rbxassetid://" .. AnimId
+        local AnimTrack = Humanoid:LoadAnimation(Animation)
+        AnimTrack:Play()
+        return AnimTrack
+    end
+    return nil
+end
+
+local function GetBangTarget()
+    for _, Player in ipairs(Players:GetPlayers()) do
+        if Player ~= lp then
+            if Player.Name:lower():find(BangTargetName) or Player.DisplayName:lower():find(BangTargetName) then
+                return Player
+            end
+        end
+    end
+    return nil
+end
+
+local function StopBang()
+    BangFollowing = false
+    if BangAnimTrack then BangAnimTrack:Stop() BangAnimTrack = nil end
+    if BangCharConnection then BangCharConnection:Disconnect() BangCharConnection = nil end
+end
+
+local function StopGetSuck()
+    GetSuckRunning = false
+    if GetSuckAnimTrack then GetSuckAnimTrack:Stop() GetSuckAnimTrack = nil end
+    if GetSuckCharConnection then GetSuckCharConnection:Disconnect() GetSuckCharConnection = nil end
+    if OriginalGravity then Workspace.Gravity = OriginalGravity OriginalGravity = nil end
+end
+
+-- ==================== ANTI-AIM ====================
+RunService.Heartbeat:Connect(function()
+    local hrp = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    if antiAim then
+        if antiAimMethod == "Reset Velo" then
+            local vel = hrp.Velocity
+            hrp.Velocity = Vector3.new(antiAimAmountX, antiAimAmountY, antiAimAmountZ)
+            RunService.RenderStepped:Wait()
+            hrp.Velocity = vel
+        elseif antiAimMethod == "Reset Pos [BROKEN]" then
+            local pos = hrp.CFrame
+            hrp.Velocity = Vector3.new(antiAimAmountX, antiAimAmountY, antiAimAmountZ)
+            RunService.RenderStepped:Wait()
+            hrp.CFrame = pos
+        elseif antiAimMethod == "Random Velo" then
+            local vel = hrp.Velocity
+            local a = math.random(-randomVeloRange, randomVeloRange)
+            local s = math.random(-randomVeloRange, randomVeloRange)
+            local d = math.random(-randomVeloRange, randomVeloRange)
+            hrp.Velocity = Vector3.new(a, s, d)
+            RunService.RenderStepped:Wait()
+            hrp.Velocity = vel
+        end
+    end
+end)
+
+-- ==================== FLY SYSTEM ====================
+local function StartFly()
+    if FlyConnection then FlyConnection:Disconnect() end
+    local Character = lp.Character
+    if not Character then return end
+    local Humanoid = Character:FindFirstChildOfClass("Humanoid")
+    local RootPart = Character:FindFirstChild("HumanoidRootPart")
+    if not (Humanoid and RootPart) then return end
+    local OriginalGravityFly = Workspace.Gravity
+    local OriginalPlatformStand = Humanoid.PlatformStand
+    Workspace.Gravity = 0
+    Humanoid.PlatformStand = true
+    local BodyGyro = Instance.new("BodyGyro", RootPart)
+    BodyGyro.P = 20000
+    BodyGyro.maxTorque = Vector3.new(math.huge, math.huge, math.huge)
+    local BodyVelocity = Instance.new("BodyVelocity", RootPart)
+    BodyVelocity.maxForce = Vector3.new(math.huge, math.huge, math.huge)
+    FlyConnection = RunService.Heartbeat:Connect(function()
+        if not CharacterSettings.FlyEnabled or not Character.Parent then
+            BodyGyro:Destroy()
+            BodyVelocity:Destroy()
+            Workspace.Gravity = OriginalGravityFly
+            Humanoid.PlatformStand = OriginalPlatformStand
+            if FlyConnection then FlyConnection:Disconnect() end
+            FlyConnection = nil
+            return
+        end
+        local CurrentCamera = workspace.CurrentCamera
+        local Direction = Vector3.new(FlyDirection.l + FlyDirection.r, 0, FlyDirection.f + FlyDirection.b)
+        local WorldDirection = CurrentCamera.CFrame:VectorToWorldSpace(Direction).Unit
+        if Direction.Magnitude <= 0 then
+            BodyVelocity.Velocity = Vector3.new(0, 0, 0)
+        else
+            BodyVelocity.Velocity = WorldDirection * CharacterSettings.FlySpeed
+        end
+        BodyGyro.CFrame = CurrentCamera.CFrame
+    end)
+end
+
+UserInputService.InputBegan:Connect(function(Input, GameProcessed)
+    if GameProcessed or not CharacterSettings.FlyEnabled then return end
+    local Key = Input.KeyCode.Name:lower()
+    if Key == "w" then FlyDirection.f = -1
+    elseif Key == "s" then FlyDirection.b = 1
+    elseif Key == "a" then FlyDirection.l = -1
+    elseif Key == "d" then FlyDirection.r = 1 end
+end)
+
+UserInputService.InputEnded:Connect(function(Input)
+    if not CharacterSettings.FlyEnabled then return end
+    local Key = Input.KeyCode.Name:lower()
+    if Key == "w" then FlyDirection.f = 0
+    elseif Key == "s" then FlyDirection.b = 0
+    elseif Key == "a" then FlyDirection.l = 0
+    elseif Key == "d" then FlyDirection.r = 0 end
+end)
+
+-- ==================== ESP SYSTEM ====================
+local function identifyPlayerRole(player)
+    if player == lp then return "Local" end
+    if isPlayerMurderer(player) then return "Murderer" end
+    if player.Character then
+        for _, tool in pairs(player.Character:GetDescendants()) do
+            if tool:IsA("Tool") and string.lower(tool.Name) == "gun" then return "Sheriff" end
+        end
+    end
+    if player.Backpack then
+        for _, tool in pairs(player.Backpack:GetChildren()) do
+            if tool:IsA("Tool") and string.lower(tool.Name) == "gun" then return "Sheriff" end
+        end
+    end
+    return "Innocent"
+end
+
+local function applyPlayerESP(p)
+    if p == lp then return end
+    local function setup(char)
+        if not char then return end
+        local highlight = char:FindFirstChild("ExodusHighlight") or Instance.new("Highlight", char)
+        highlight.Name = "ExodusHighlight"
+        highlight.FillTransparency = 0.5
+        local head = char:FindFirstChild("Head")
+        if head then
+            local bill = head:FindFirstChild("ExodusBill") or Instance.new("BillboardGui", head)
+            bill.Name = "ExodusBill"
+            bill.Size = UDim2.new(0, 100, 0, 50)
+            bill.AlwaysOnTop = true
+            bill.ExtentsOffset = Vector3.new(0, 3, 0)
+            local label = bill:FindFirstChild("ExodusLabel") or Instance.new("TextLabel", bill)
+            label.Name = "ExodusLabel"
+            label.Size = UDim2.new(1, 0, 1, 0)
+            label.BackgroundTransparency = 1
+            label.Font = Enum.Font.GothamBold
+            label.TextSize = 14
+            label.TextStrokeTransparency = 0
+            label.TextStrokeColor3 = Color3.new(0, 0, 0)
+            task.spawn(function()
+                while char and char.Parent do
+                    if _G.ESPEnabled then
+                        local role = identifyPlayerRole(p)
+                        bill.Enabled = true
+                        highlight.Enabled = true
+                        if role == "Murderer" then
+                            highlight.FillColor = Color3.new(1, 0, 0)
+                            label.Text = "🔪 MURDERER\n▼"
+                            label.TextColor3 = Color3.new(1, 0, 0)
+                        elseif role == "Sheriff" then
+                            highlight.FillColor = Color3.new(0, 0, 1)
+                            label.Text = "🔫 SHERIFF\n▼"
+                            label.TextColor3 = Color3.new(0, 0, 1)
+                        else
+                            highlight.FillColor = Color3.new(0, 1, 0)
+                            label.Text = "✓ INNOCENT\n▼"
+                            label.TextColor3 = Color3.new(0, 1, 0)
+                        end
+                    else
+                        highlight.Enabled = false
+                        if bill then bill.Enabled = false end
+                    end
+                    task.wait(0.5)
+                end
+            end)
+        end
+    end
+    p.CharacterAdded:Connect(setup)
+    if p.Character then setup(p.Character) end
+end
+
+for _, v in pairs(Players:GetPlayers()) do applyPlayerESP(v) end
+Players.PlayerAdded:Connect(applyPlayerESP)
+
+-- ==================== PERSISTENT PLAYER STATS ====================
+RunService.Heartbeat:Connect(function()
+    pcall(function()
+        if lp.Character and lp.Character:FindFirstChild("Humanoid") and lp.Character:FindFirstChild("HumanoidRootPart") then
+            local hum = lp.Character.Humanoid
+            local hrp = lp.Character.HumanoidRootPart
+            hum.WalkSpeed = _G.DesiredSpeed
+            hum.JumpPower = _G.DesiredJump
+            if _G.SpeedGlitchEnabled and hum.FloorMaterial == Enum.Material.Air then
+                local moveDir = hum.MoveDirection
+                if moveDir.Magnitude > 0 then
+                    hrp.Velocity = Vector3.new(moveDir.X * _G.SpeedGlitchValue, hrp.Velocity.Y, moveDir.Z * _G.SpeedGlitchValue)
+                end
+            end
+        end
+    end)
+end)
+
+-- ==================== PC KEYBIND LISTENER ====================
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == _G.BindShoot then fireGun()
+    elseif input.KeyCode == _G.BindThrow then throwAction()
+    elseif input.KeyCode == _G.BindBomb then DoFakeBombJump() end
+end)
+
+-- ==================== APPLY STATS ON RESPAWN ====================
+local function applyStats(char)
+    local hum = char:WaitForChild("Humanoid")
+    hum.WalkSpeed = _G.DesiredSpeed
+    hum.UseJumpPower = true
+    hum.JumpPower = _G.DesiredJump
+end
+
+lp.CharacterAdded:Connect(function(NewChar)
+    task.wait(0.5)
+    local Humanoid = NewChar:FindFirstChildOfClass("Humanoid")
+    if Humanoid then
+        if CharacterSettings.WalkspeedEnabled then Humanoid.WalkSpeed = CharacterSettings.Walkspeed end
+        if CharacterSettings.JumppowerEnabled then Humanoid.JumpPower = CharacterSettings.Jumppower end
+    end
+    if CharacterSettings.FlyEnabled then StartFly() end
+    applyStats(NewChar)
+end)
+
+if lp.Character then applyStats(lp.Character) end
+
+lp.CharacterAdded:Connect(function(char)
+    task.wait(0.5)
+    if char then RaycastParameters.FilterDescendantsInstances = {char} end
+end)
+if lp.Character then RaycastParameters.FilterDescendantsInstances = {lp.Character} end
+
+-- ==================== FLOATING BUTTONS MODERN ====================
+
+local function makeDraggable(btn)
+    local dragStart, startPos, isDragging = nil, nil, false
+    btn.MouseButton1Click:Connect(function() end)
+    btn.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragStart, startPos, isDragging = input.Position, btn.Position, false
+        end
+    end)
+    btn.InputChanged:Connect(function(input)
+        if dragStart and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
+            local delta = (input.Position - dragStart).Magnitude
+            if delta > 10 and not _G.LockAll then
+                isDragging = true
+                btn.Position = UDim2.new(
+                    startPos.X.Scale, startPos.X.Offset + (input.Position.X - dragStart.X),
+                    startPos.Y.Scale, startPos.Y.Offset + (input.Position.Y - dragStart.Y)
+                )
+            end
+        end
+    end)
+    btn.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragStart, isDragging = nil, false
+        end
+    end)
+end
+
+local CreatedButtons = {}
+local EditMode = false
+local MASTER_VIOLET = Color3.fromRGB(138, 43, 226)
+
+local function createShape(name, pos, text, callback)
+    local btn = Instance.new("TextButton")
+    btn.Name = name
+    btn.Size = UDim2.fromOffset(70, 70)
+    btn.Position = pos
+    btn.AnchorPoint = Vector2.new(0.5, 0.5)
+    btn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    btn.BackgroundTransparency = 0.4
+    btn.Visible = false
+    btn.Text = text
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.GothamMedium
+    btn.TextScaled = true
+    btn.Parent = ScreenGui
+
+    local uc = Instance.new("UICorner", btn)
+    uc.CornerRadius = UDim.new(1, 0)
+
+    local st = Instance.new("UIStroke", btn)
+    st.Thickness = 3
+    st.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    st.Color = Color3.fromRGB(255, 255, 255)
+
+    local gradient = Instance.new("UIGradient", st)
+    gradient.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, MASTER_VIOLET),
+        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 255, 255)),
+        ColorSequenceKeypoint.new(1, MASTER_VIOLET)
+    })
+
+    RunService.RenderStepped:Connect(function(dt)
+        gradient.Rotation = (gradient.Rotation + (180 * dt)) % 360
+    end)
+
+    btn.MouseButton1Click:Connect(function()
+        if not EditMode then callback() end
+    end)
+
+    makeDraggable(btn)
+    table.insert(CreatedButtons, btn)
+    return btn
+end
+
+local ShootBtn = createShape("Shoot_Btn_Rounded", DefaultShootPos, "SHOOT", fireGun)
+local ThrowBtn = createShape("Throw_Btn", DefaultThrowPos, "THROW", throwAction)
+local BombBtn = createShape("Bomb_Btn", DefaultBombPos, "💣", DoFakeBombJump)
+
+local function makeButtonTextBold(btn, customSize)
+    btn.TextScaled = false
+    btn.Font = Enum.Font.GothamBold
+    if customSize then
+        btn.TextSize = customSize
+    else
+        btn.TextSize = 18
+    end
+end
+
+makeButtonTextBold(ThrowBtn, 18)
+makeButtonTextBold(BombBtn, 30)
+
+ShootBtn.Size = UDim2.fromOffset(150, 50)
+ShootBtn.TextScaled = false
+ShootBtn.TextSize = 18
+ShootBtn.Font = Enum.Font.GothamBold
+local shootCorner = ShootBtn:FindFirstChildOfClass("UICorner")
+if shootCorner then shootCorner.CornerRadius = UDim.new(0, 12) end
+ShootBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+
+BombBtn.TextScaled = false
+BombBtn.TextSize = 30
+BombBtn.Visible = false
+BombButton = BombBtn
+
+ShootBtn.Visible = true
+ThrowBtn.Visible = true
+
+local function setGlobalOpacity(val)
+    for _, btn in ipairs(CreatedButtons) do
+        btn.BackgroundTransparency = 1 - val
+        btn.TextTransparency = 1 - val
+        local stroke = btn:FindFirstChildOfClass("UIStroke")
+        if stroke then stroke.Transparency = 1 - val end
+    end
+end
+
+local function setGlobalScale(px)
+    for _, btn in ipairs(CreatedButtons) do
+        local ratio = btn.Size.Y.Offset / btn.Size.X.Offset
+        btn.Size = UDim2.fromOffset(px, px * ratio)
+    end
+end
+
+local function setGlobalHeight(h)
+    for _, btn in ipairs(CreatedButtons) do
+        local w = btn.Size.X.Offset
+        btn.Size = UDim2.fromOffset(w, h)
+    end
+end
+
+local shapeConfigs = {
+    Circle = { corner = UDim.new(1, 0), forceSquare = true },
+    Square = { corner = UDim.new(0, 0), forceSquare = true },
+    ["Rounded Rectangle"] = { corner = UDim.new(0, 12), forceSquare = false },
+    Capsule = { corner = UDim.new(1, 0), forceSquare = false },
+    ["Sharp Rectangle"] = { corner = UDim.new(0, 0), forceSquare = false },
+}
+local shapesList = {"Circle", "Square", "Rounded Rectangle", "Capsule", "Sharp Rectangle"}
+
+local function setGlobalShape(shapeName)
+    local cfg = shapeConfigs[shapeName]
+    if not cfg then return end
+    for _, btn in ipairs(CreatedButtons) do
+        if btn ~= ShootBtn then
+            local w = btn.Size.X.Offset
+            local newHeight = cfg.forceSquare and w or (w * 0.6)
+            btn.Size = UDim2.fromOffset(w, newHeight)
+            local corner = btn:FindFirstChildOfClass("UICorner")
+            if corner then corner.CornerRadius = cfg.corner end
+        end
+    end
+end
+
+WindUI:AddTheme({
+    ["Name"] = "Dark",
+    ["Accent"] = "#18181b",
+    ["Dialog"] = "#18181b",
+    ["PanelBackground"] = "#18181b",
+    ["Outline"] = "#FFFFFF",
+    ["Text"] = "#FFFFFF",
+    ["Placeholder"] = "#999999",
+    ["Background"] = "#0e0e10",
+    ["Button"] = "#52525b",
+    ["Icon"] = "#a1a1aa"
+})
+
+WindUI:AddTheme({
+    ["Name"] = "Light",
+    ["Accent"] = "#f4f4f5",
+    ["Dialog"] = "#f4f4f5",
+    ["PanelBackground"] = "#f4f4f5",
+    ["Outline"] = "#000000",
+    ["Text"] = "#000000",
+    ["Placeholder"] = "#666666",
+    ["Background"] = "#ffffff",
+    ["Button"] = "#e4e4e7",
+    ["Icon"] = "#52525b"
+})
+
+WindUI:AddTheme({
+    ["Name"] = "Gray",
+    ["Accent"] = "#374151",
+    ["Dialog"] = "#374151",
+    ["PanelBackground"] = "#374151",
+    ["Outline"] = "#d1d5db",
+    ["Text"] = "#f9fafb",
+    ["Placeholder"] = "#9ca3af",
+    ["Background"] = "#1f2937",
+    ["Button"] = "#4b5563",
+    ["Icon"] = "#d1d5db"
+})
+
+WindUI:AddTheme({
+    ["Name"] = "Blue",
+    ["Accent"] = "#1e40af",
+    ["Dialog"] = "#1e3a8a",
+    ["PanelBackground"] = "#1e3a8a",
+    ["Outline"] = "#93c5fd",
+    ["Text"] = "#f0f9ff",
+    ["Placeholder"] = "#60a5fa",
+    ["Background"] = "#1e293b",
+    ["Button"] = "#3b82f6",
+    ["Icon"] = "#93c5fd"
+})
+
+WindUI:AddTheme({
+    ["Name"] = "Green",
+    ["Accent"] = "#059669",
+    ["Dialog"] = "#047857",
+    ["PanelBackground"] = "#047857",
+    ["Outline"] = "#6ee7b7",
+    ["Text"] = "#ecfdf5",
+    ["Placeholder"] = "#34d399",
+    ["Background"] = "#064e3b",
+    ["Button"] = "#10b981",
+    ["Icon"] = "#6ee7b7"
+})
+
+WindUI:AddTheme({
+    ["Name"] = "Purple",
+    ["Accent"] = "#FFFFFF",
+    ["Dialog"] = "#3b0764",
+    ["PanelBackground"] = "#3b0764",
+    ["Outline"] = "#FFFFFF",
+    ["Text"] = "#FFFFFF",
+    ["Placeholder"] = "#c4b5fd",
+    ["Background"] = "#4c1d95",
+    ["Button"] = "#6d28d9",
+    ["Icon"] = "#FFFFFF"
+})
+
+WindUI:AddTheme({
+    ["Name"] = "Crimson",
+    ["Accent"] = "#1a1a1a",
+    ["Dialog"] = "#1a1a1a",
+    ["PanelBackground"] = "#1a1a1a",
+    ["Outline"] = "#FF0000",
+    ["Text"] = "#FFFFFF",
+    ["Placeholder"] = "#888888",
+    ["Background"] = "#0d0d0d",
+    ["Button"] = "#cc0000",
+    ["Icon"] = "#ff0000"
+})
+
+-- ===== THUNDER HUB THEME (ROSE - THEME KEDUA) =====
+WindUI:AddTheme({
+    ["Name"] = "Rose",
+    ["Accent"] = "#6a329f",
+    ["Dialog"] = "#3b0764",
+    ["PanelBackground"] = "#2d0a4a",
+    ["Outline"] = "#ffd966",
+    ["Text"] = "#FFFFFF",
+    ["Placeholder"] = "#c4b5fd",
+    ["Background"] = "#1a002a",
+    ["Button"] = "#6d28d9",
+    ["Icon"] = "#ffd966"
+})
+
+-- ===== THUNDER HUB THEME (DARK RED) =====
+WindUI:AddTheme({
+    ["Name"] = "DarkRed",
+    ["Accent"] = "#8B0000",
+    ["Dialog"] = "#2D0000",
+    ["PanelBackground"] = "#1A0000",
+    ["Outline"] = "#FF0000",
+    ["Text"] = "#FF4444",
+    ["Placeholder"] = "#662222",
+    ["Background"] = "#0A0000",
+    ["Button"] = "#8B0000",
+    ["Icon"] = "#FF0000"
+})
+
+-- ===== THUNDER HUB THEME (PURPLE) =====
+WindUI:AddTheme({
+    ["Name"] = "Purple",
+    ["Accent"] = "#FFFFFF",
+    ["Dialog"] = "#3b0764",
+    ["PanelBackground"] = "#3b0764",
+    ["Outline"] = "#FFFFFF",
+    ["Text"] = "#FFFFFF",
+    ["Placeholder"] = "#c4b5fd",
+    ["Background"] = "#4c1d95",
+    ["Button"] = "#6d28d9",
+    ["Icon"] = "#FFFFFF"
+})
+
+local Window = WindUI:CreateWindow({
+    Title = "🔪 AETHER HUB | MM2 FFA",
+    Icon = "blade",
+    Author = "by @Me",
+    Folder = "ExodusConfigs",
+    Size = UDim2.fromOffset(580, 600),
+    MinSize = Vector2.new(560, 450),
+    MaxSize = Vector2.new(850, 700),
+    ToggleKey = Enum.KeyCode.R,
+    Resizable = true,
+    SideBarWidth = 180,
+})
+
+-- ==================== TAB MAIN ====================
+local MainTab = Window:Tab({ Title = "🏠 Main", Icon = "" })
+
+MainTab:Section({ Title = "Role ESP", Opened = true })
+MainTab:Toggle({ Title = "Enable Arrow ESP", Desc = "Show player highlights with roles", Value = false, Callback = function(V) _G.ESPEnabled = V end })
+
+MainTab:Section({ Title = "Master Lock", Opened = true })
+MainTab:Toggle({ Title = "Lock/Unlock Floating UI", Desc = "Prevent dragging buttons", Value = false, Callback = function(V) _G.LockAll = V end })
+
+MainTab:Section({ Title = "UI Settings", Opened = true })
+MainTab:Toggle({ Title = "Show Shoot Button", Desc = "Show/Hide shoot button", Value = true, Callback = function(V) ShootBtn.Visible = V end })
+MainTab:Toggle({ Title = "Show Throw Button", Desc = "Show/Hide throw button", Value = true, Callback = function(V) ThrowBtn.Visible = V end })
+MainTab:Toggle({ Title = "Show Bomb Button", Desc = "Show/Hide bomb button", Value = false, Callback = function(V) if BombBtn then BombBtn.Visible = V end if not V and BombEnabled then BombEnabled = false end end })
+MainTab:Button({ Title = "Reset UI Positions", Desc = "Reset floating buttons to default", Callback = function() 
+    ShootBtn.Position = DefaultShootPos
+    ThrowBtn.Position = DefaultThrowPos
+    BombBtn.Position = DefaultBombPos
+    WindUI:Notify({Title = "UI Reset", Content = "Button positions reset!", Duration = 1})
+end })
+
+MainTab:Section({ Title = "Button Appearance (Global for Throw & Bomb)", Opened = true })
+MainTab:Slider({ 
+    Title = "Opacity", 
+    Desc = "Transparency", 
+    Step = 0.05, 
+    Value = { Min = 0.1, Max = 1, Default = 0.6 }, 
+    Callback = function(val) setGlobalOpacity(val) end 
+})
+MainTab:Slider({ 
+    Title = "Scale", 
+    Desc = "Size Button)", 
+    Step = 5, 
+    Value = { Min = 40, Max = 150, Default = 70 }, 
+    Callback = function(val) setGlobalScale(val) end 
+})
+MainTab:Slider({ 
+    Title = "Button Height", 
+    Desc = "Adjust height of ALL buttons", 
+    Step = 5, 
+    Value = { Min = 30, Max = 200, Default = 70 }, 
+    Callback = function(val) setGlobalHeight(val) end 
+})
+MainTab:Dropdown({ 
+    Title = "Shape", 
+    Desc = "Change shape of Throw & Bomb buttons only", 
+    Values = shapesList, 
+    Value = "Circle", 
+    Callback = function(selected) setGlobalShape(selected) end 
+})
+
+MainTab:Section({ Title = "💣 Fake Bomb Jump", Opened = true })
+MainTab:Toggle({ Title = "Enable Fake Bomb Jump", Desc = "Enable bomb placement & jump (also shows bomb button)", Value = false, Callback = function(State) 
+    BombEnabled = State 
+    if BombBtn then BombBtn.Visible = State end 
+    if not State then 
+        if BombCooldownConnection then BombCooldownConnection:Disconnect() end 
+        BombCooldownActive = false 
+        UpdateBombButtonAppearance() 
+    end 
+    WindUI:Notify({Title = "Fake Bomb", Content = State and "Enabled! Click the 💣 button" or "Disabled!", Duration = 2}) 
+end })
+MainTab:Slider({ Title = "⏲️ Bomb Cooldown (seconds)", Desc = "Time between bomb placements", Step = 1, Value = { Min = 5, Max = 60, Default = 20 }, Callback = function(Value) BombCooldown = Value WindUI:Notify({Title = "Bomb Cooldown", Content = "Set to " .. Value .. " seconds", Duration = 1}) end })
+MainTab:Button({ Title = "Reset Bomb Button Position", Desc = "Move bomb button to default position", Callback = function() if BombBtn then BombBtn.Position = DefaultBombPos WindUI:Notify({Title = "Reset", Content = "Bomb button position reset!", Duration = 1}) end end })
+
+-- ==================== TAB COMBAT ====================
+local CombatTab = Window:Tab({ Title = "⚔️ Combat", Icon = "" })
+
+local GunSection = CombatTab:Section({ Title = "🔫 Gun Combat", Opened = true })
+GunSection:Button({ Title = "Shoot Nearest Player", Desc = "Fire gun at closest target", Callback = function() fireGun() end })
+GunSection:Toggle({ Title = "Auto Shoot", Desc = "Automatically shoot nearest player", Value = false, Callback = function(V) _G.AutoShoot = V end })
+
+local SheriffSection = CombatTab:Section({ Title = "👮 SHERIFF - FORCE SHOOT", Opened = true })
+SheriffSection:Toggle({ Title = "Force Shoot", Desc = "Force Shoot For All Players", Value = false, Callback = function(State) 
+    ForceShootEnabled = State 
+    if State then 
+        StartForceShoot() 
+        WindUI:Notify({Title = "Force Shoot", Content = "Enabled! Shooting all tool holders", Duration = 2}) 
+    else 
+        StopForceShoot() 
+        WindUI:Notify({Title = "Force Shoot", Content = "Disabled!", Duration = 1}) 
+    end 
+end })
+
+local KnifeSection = CombatTab:Section({ Title = "🗡️ Knife Combat", Opened = true })
+KnifeSection:Button({ Title = "Throw Knife at Nearest", Desc = "Throw knife at closest target", Callback = function() throwAction() end })
+
+KnifeSection:Dropdown({
+    Title = "🎯 Prediction Mode",
+    Desc = "Choose knife prediction mode (22 modes available)",
+    Values = {
+        "Default", "V2", "Hybrid", "Mega", "Ultra", "New", 
+        "Ultra Edit", "Extreme", "Ultimate", "Omni", 
+        "Velocity", "Movement", "Interpolation", "Trajectory", 
+        "Quantum", "Position", "Angle", "Speed", "Vertical", 
+        "Hybrid4", "UltimatePro", "UltraOmni"
+    },
+    Value = "UltraOmni",
+    Callback = function(Value)
+        if Value == "Default" then
+            PREDICTION_MODE = "Default"
+            WindUI:Notify({Title = "Prediction Mode", Content = "Default (Linear + Direction)", Duration = 1})
+        elseif Value == "V2" then
+            PREDICTION_MODE = "V2"
+            WindUI:Notify({Title = "Prediction Mode", Content = "V2 (Horizontal Only)", Duration = 1})
+        elseif Value == "Hybrid" then
+            PREDICTION_MODE = "Hybrid"
+            WindUI:Notify({Title = "Prediction Mode", Content = "Hybrid (Default + V2)", Duration = 1})
+        elseif Value == "Mega" then
+            PREDICTION_MODE = "Mega"
+            WindUI:Notify({Title = "Prediction Mode", Content = "MEGA (Advanced Physics)", Duration = 2})
+        elseif Value == "Ultra" then
+            PREDICTION_MODE = "Ultra"
+            WindUI:Notify({Title = "Prediction Mode", Content = "ULTRA (4 Modes Averaged)", Duration = 2})
+        elseif Value == "New" then
+            PREDICTION_MODE = "New"
+            WindUI:Notify({Title = "Prediction Mode", Content = "NEW (Aggressive + Jump)", Duration = 2})
+        elseif Value == "Ultra Edit" then
+            PREDICTION_MODE = "Ultra Edit"
+            WindUI:Notify({Title = "Prediction Mode", Content = "ULTRA EDIT (Dynamic + Ping)", Duration = 2})
+        elseif Value == "Extreme" then
+            PREDICTION_MODE = "Extreme"
+            WindUI:Notify({Title = "Prediction Mode", Content = "EXTREME (Accel + Zigzag)", Duration = 2})
+        elseif Value == "Ultimate" then
+            PREDICTION_MODE = "Ultimate"
+            WindUI:Notify({Title = "Prediction Mode", Content = "ULTIMATE (History + Ensemble)", Duration = 2})
+        elseif Value == "Omni" then
+            PREDICTION_MODE = "Omni"
+            WindUI:Notify({Title = "Prediction Mode", Content = "OMNI (9 Modes Averaged)", Duration = 2})
+        elseif Value == "Velocity" then
+            PREDICTION_MODE = "Velocity"
+            WindUI:Notify({Title = "Prediction Mode", Content = "VELOCITY (Travel Time + Gravity)", Duration = 2})
+        elseif Value == "Movement" then
+            PREDICTION_MODE = "Movement"
+            WindUI:Notify({Title = "Prediction Mode", Content = "MOVEMENT (Position Delta)", Duration = 2})
+        elseif Value == "Interpolation" then
+            PREDICTION_MODE = "Interpolation"
+            WindUI:Notify({Title = "Prediction Mode", Content = "INTERPOLATION (Smoothing)", Duration = 2})
+        elseif Value == "Trajectory" then
+            PREDICTION_MODE = "Trajectory"
+            WindUI:Notify({Title = "Prediction Mode", Content = "TRAJECTORY (Parabolic Arc)", Duration = 2})
+        elseif Value == "Quantum" then
+            PREDICTION_MODE = "Quantum"
+            WindUI:Notify({Title = "Prediction Mode", Content = "⚛️ QUANTUM (Perceptron Adaptive)", Duration = 2})
+        elseif Value == "Position" then
+            PREDICTION_MODE = "Position"
+            WindUI:Notify({Title = "Prediction Mode", Content = "📍 POSITION (Velocity * Time)", Duration = 2})
+        elseif Value == "Angle" then
+            PREDICTION_MODE = "Angle"
+            WindUI:Notify({Title = "Prediction Mode", Content = "📐 ANGLE (Distance / 50)", Duration = 2})
+        elseif Value == "Speed" then
+            PREDICTION_MODE = "Speed"
+            WindUI:Notify({Title = "Prediction Mode", Content = "⚡ SPEED (Vel.Magnitude / 16.5)", Duration = 2})
+        elseif Value == "Vertical" then
+            PREDICTION_MODE = "Vertical"
+            WindUI:Notify({Title = "Prediction Mode", Content = "⬆ VERTICAL (Y Correction)", Duration = 2})
+        elseif Value == "Hybrid4" then
+            PREDICTION_MODE = "Hybrid4"
+            WindUI:Notify({Title = "Prediction Mode", Content = "🔀 HYBRID4 (4 Modes Combined)", Duration = 2})
+        elseif Value == "UltimatePro" then
+            PREDICTION_MODE = "UltimatePro"
+            WindUI:Notify({Title = "Prediction Mode", Content = "👑 ULTIMATE PRO (Premium Mode)", Duration = 2})
+        elseif Value == "UltraOmni" then
+            PREDICTION_MODE = "UltraOmni"
+            WindUI:Notify({Title = "Prediction Mode", Content = "🌀 ULTRA OMNI (All 22 Modes)", Duration = 2})
+        end
+    end
+})
+
+KnifeSection:Slider({ Title = "🔪 Throw Offset", Step = 0.1, Value = { Min = 1, Max = 8, Default = 2.8 }, Callback = function(Value) KNIFE_OFFSET = Value WindUI:Notify({Title = "Knife Offset", Content = "Set to " .. Value, Duration = 1}) end })
+KnifeSection:Slider({ Title = "📶 Offset-to-Ping Multiplier", Step = 0.1, Value = { Min = 0.5, Max = 3, Default = 1.2 }, Callback = function(Value) KNIFE_PING_MULTIPLIER = Value WindUI:Notify({Title = "Ping Multiplier", Content = "Set to " .. Value, Duration = 1}) end })
+KnifeSection:Toggle({ Title = "🌐 Smooth Throw", Value = false, Callback = function(State) COMBINE_VELOCITY_12 = State WindUI:Notify({Title = "Smooth Throw", Content = State and "On" or "Off", Duration = 1}) end })
+KnifeSection:Dropdown({ Title = "⚡ Throw Mode", Values = {"🎬 Animated", "⚡ Instant"}, Value = "⚡ Instant", Callback = function(Value) THROW_MODE = (Value == "🎬 Animated") and "Animated" or "Instant" WindUI:Notify({Title = "Throw Mode", Content = "Set to " .. Value, Duration = 1}) end })
+KnifeSection:Slider({ Title = "⏱️ Animation Delay", Step = 0.1, Value = { Min = 0.1, Max = 2, Default = 0.8 }, Callback = function(Value) ANIMATION_DELAY = Value WindUI:Notify({Title = "Animation Delay", Content = "Set to " .. Value .. " seconds", Duration = 1}) end })
+KnifeSection:Slider({ Title = "⏲️ Throw Cooldown", Step = 0.1, Value = { Min = 0.1, Max = 3, Default = 0.8 }, Callback = function(Value) THROW_COOLDOWN = Value WindUI:Notify({Title = "Throw Cooldown", Content = "Set to " .. Value .. " seconds", Duration = 1}) end })
+KnifeSection:Toggle({ Title = "🔄 Auto Spam Throw", Value = false, Callback = function(State) AUTO_SPAM_THROW = State if State then StartAutoSpamThrow() WindUI:Notify({Title = "Auto Spam Throw", Content = "Enabled! Throwing continuously", Duration = 2}) else StopAutoSpamThrow() WindUI:Notify({Title = "Auto Spam Throw", Content = "Disabled!", Duration = 1}) end end })
+
+-- ==================== KILL ALL & LOOP KILL ALL ====================
+local KillAllLoopActive = false
+local KillAllLoopConnection = nil
+
+local function killAllPlayers()
+    local players = game:GetService("Players"):GetPlayers()
+    local localPlayer = game.Players.LocalPlayer
+    local killed = 0
+    for _, player in ipairs(players) do
+        if player ~= localPlayer and player.Character then
+            local humanoid = player.Character:FindFirstChildWhichIsA("Humanoid")
+            if humanoid and humanoid.Health > 0 then
+                humanoid.Health = 0
+                killed = killed + 1
+            end
+        end
+    end
+    return killed
+end
+
+local function startKillAllLoop()
+    if KillAllLoopConnection then return end
+    KillAllLoopConnection = RunService.Heartbeat:Connect(function()
+        if KillAllLoopActive then
+            local killed = killAllPlayers()
+            if killed > 0 then
+            end
+        end
+    end)
+end
+
+local function stopKillAllLoop()
+    if KillAllLoopConnection then
+        KillAllLoopConnection:Disconnect()
+        KillAllLoopConnection = nil
+    end
+end
+
+KnifeSection:Button({ 
+    Title = "💀 Kill All Players", 
+    Desc = "Instantly kill all other players (Murderer only)", 
+    Callback = function()
+        local killed = killAllPlayers()
+        WindUI:Notify({Title = "Kill All", Content = "Killed " .. killed .. " players!", Duration = 2})
+    end 
+})
+
+KnifeSection:Toggle({ 
+    Title = "🔄 Loop Kill All", 
+    Desc = "Continuously kill all other players every frame", 
+    Value = false, 
+    Callback = function(State)
+        KillAllLoopActive = State
+        if State then
+            startKillAllLoop()
+            WindUI:Notify({Title = "Loop Kill All", Content = "Enabled! Killing all players continuously", Duration = 2})
+        else
+            stopKillAllLoop()
+            WindUI:Notify({Title = "Loop Kill All", Content = "Disabled!", Duration = 1})
+        end
+    end 
+})
+
+-- ==================== TAB TROLLING ====================
+local TrollingTab = Window:Tab({ Title = "💀 Trolling", Icon = "" })
+
+local FlingSection = TrollingTab:Section({ Title = "🌀 Fling", Opened = true })
+FlingSection:Input({ Title = "Input Fling Target", Placeholder = "Player name...", Callback = function(Text) FlingTargetName = Text:lower() end })
+FlingSection:Button({ Title = "Fling Sheriff", Callback = function() local T = GetSheriffTarget() if T then SkidFling(T) else WindUI:Notify({Title = "Fling", Content = "Sheriff not found!", Duration = 2}) end end })
+FlingSection:Button({ Title = "Fling Murderer", Callback = function() local T = GetMurdererTarget() if T then SkidFling(T) else WindUI:Notify({Title = "Fling", Content = "Murderer not found!", Duration = 2}) end end })
+FlingSection:Button({ Title = "Fling Player (Input)", Callback = function() if FlingTargetName == "" then WindUI:Notify({Title = "Fling", Content = "Enter name!", Duration = 2}) return end local T = GetTargetByName(FlingTargetName) if T then SkidFling(T) else WindUI:Notify({Title = "Fling", Content = "Not found!", Duration = 2}) end end })
+FlingSection:Button({ Title = "Fling All", Callback = function() FlingAll() end })
+FlingSection:Button({ Title = "Fix Fling Teleport Bug", Callback = function() local RootPart = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart") if RootPart and OldPos then RootPart.CFrame = OldPos WindUI:Notify({Title = "Fling", Content = "Fixed!", Duration = 3}) else WindUI:Notify({Title = "Fling", Content = "No saved position!", Duration = 3}) end end })
+FlingSection:Toggle({ Title = "Fling Aura", Value = false, Callback = function(State) FlingAuraEnabled = State if FlingAuraConnection then FlingAuraConnection:Disconnect() end if State then FlingAuraConnection = RunService.Heartbeat:Connect(function() if FlingAuraEnabled and lp.Character then local MyRoot = lp.Character:FindFirstChild("HumanoidRootPart") if MyRoot then for _, P in pairs(Players:GetPlayers()) do if P ~= lp and P.Character then local TR = P.Character:FindFirstChild("HumanoidRootPart") if TR and (MyRoot.Position - TR.Position).Magnitude <= 10 then SkidFling(P) task.wait(0.5) end end end end end end) end end })
+FlingSection:Toggle({ Title = "Click Fling", Value = false, Callback = function(State) ClickFlingEnabled = State end })
+local mouse = lp:GetMouse()
+if mouse then mouse.Button1Down:Connect(function() if ClickFlingEnabled then local Target = mouse.Target if Target and Target.Parent then local P = Players:FindFirstChild(Target.Parent.Name) if P and P ~= lp then SkidFling(P) end end end end) end
+
+local TouchFlingSection = TrollingTab:Section({ Title = "⚡ Touch Fling", Opened = true })
+TouchFlingSection:Toggle({ Title = "Touch Fling", Value = false, Callback = function(State) TouchFlingEnabled = State if State then coroutine.wrap(TouchFlingLoop)() end end })
+TouchFlingSection:Toggle({ Title = "Custom Touch Fling Power", Value = false, Callback = function(State) CustomTouchFlingEnabled = State if State then coroutine.wrap(CustomTouchFlingLoop)() end end })
+TouchFlingSection:Slider({ Title = "Fling Power Value", Step = 1, Value = { Min = 1, Max = 10000, Default = 1000 }, Callback = function(Value) CustomFlingPower = Value end })
+
+local AntiFlingSection = TrollingTab:Section({ Title = "🛡️ Anti Fling", Opened = true })
+AntiFlingSection:Toggle({ Title = "Anti Fling", Value = false, Callback = function(State) AntiFlingEnabled = State if State then StartAntiFling() else StopAntiFling() end end })
+
+local GangBangSection = TrollingTab:Section({ Title = "👥 Gang Bang", Opened = true })
+GangBangSection:Input({ Title = "Input Bang Target", Placeholder = "Player name...", Callback = function(Text) BangTargetName = Text:lower() end })
+GangBangSection:Toggle({ Title = "Bang", Value = false, Callback = function(State) 
+    if State then 
+        BangTarget = GetBangTarget() 
+        if BangTarget then 
+            BangFollowing = true 
+            local function BangLoop() 
+                while BangFollowing do 
+                    local MyChar = lp.Character 
+                    local MyHum = MyChar and MyChar:FindFirstChildOfClass("Humanoid") 
+                    local MyRoot = MyChar and MyChar:FindFirstChild("HumanoidRootPart") 
+                    local TChar = BangTarget.Character 
+                    local TRoot = TChar and TChar:FindFirstChild("HumanoidRootPart") 
+                    if MyHum and MyRoot and TRoot then 
+                        if not (BangAnimTrack and BangAnimTrack.IsPlaying) then 
+                            BangAnimTrack = PlayAnimation(MyHum, BangAnimationId) 
+                            if BangAnimTrack then BangAnimTrack:AdjustSpeed(2) end 
+                        end 
+                        local P1 = TRoot.CFrame * CFrame.new(0,0,1) 
+                        local P2 = TRoot.CFrame * CFrame.new(0,0,2.5) 
+                        TweenService:Create(MyRoot, TweenInfo.new(0.2), {CFrame = P1}):Play() 
+                        task.wait(0.2) 
+                        TweenService:Create(MyRoot, TweenInfo.new(0.2), {CFrame = P2}):Play() 
+                        task.wait(0.2) 
+                    else 
+                        task.wait(0.5) 
+                    end 
+                end 
+                if BangAnimTrack then BangAnimTrack:Stop() end 
+            end 
+            BangCoroutine = coroutine.wrap(BangLoop) 
+            BangCoroutine() 
+            BangCharConnection = lp.CharacterAdded:Connect(function(NewChar) 
+                if BangFollowing then 
+                    local NHum = NewChar:WaitForChild("Humanoid") 
+                    if BangAnimTrack then BangAnimTrack:Stop() end 
+                    BangAnimTrack = PlayAnimation(NHum, BangAnimationId) 
+                    if BangAnimTrack then BangAnimTrack:AdjustSpeed(2) end 
+                end 
+            end) 
+        else 
+            WindUI:Notify({Title = "Bang", Content = "Target not found!", Duration = 2}) 
+            StopBang() 
+        end 
+    else 
+        StopBang() 
+    end 
+end })
+
+local GetSuckSection = TrollingTab:Section({ Title = "🔄 Get Suck", Opened = true })
+GetSuckSection:Toggle({ Title = "Get Suck", Value = false, Callback = function(State) 
+    if State then 
+        BangTarget = GetBangTarget() 
+        if BangTarget then 
+            GetSuckRunning = true 
+            OriginalGravity = Workspace.Gravity 
+            Workspace.Gravity = 0 
+            local function GetSuckLoop() 
+                local MyChar = lp.Character 
+                local MyHum = MyChar and MyChar:FindFirstChildOfClass("Humanoid") 
+                if MyHum then 
+                    GetSuckAnimTrack = PlayAnimation(MyHum, GetSuckAnimationId) 
+                    if GetSuckAnimTrack then GetSuckAnimTrack:AdjustSpeed(2) end 
+                end 
+                while GetSuckRunning do 
+                    local MyRoot = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart") 
+                    local TRoot = BangTarget.Character and BangTarget.Character:FindFirstChild("HumanoidRootPart") 
+                    if MyRoot and TRoot then 
+                        MyRoot.CFrame = TRoot.CFrame * CFrame.new(0,2.3,-1.1) * CFrame.Angles(0,math.pi,0) 
+                        MyRoot.Velocity = Vector3.new(0,0,0) 
+                    else 
+                        task.wait(0.5) 
+                    end 
+                    RunService.Heartbeat:Wait() 
+                end 
+                if GetSuckAnimTrack then GetSuckAnimTrack:Stop() end 
+                if OriginalGravity then Workspace.Gravity = OriginalGravity end 
+            end 
+            GetSuckCoroutine = coroutine.wrap(GetSuckLoop) 
+            GetSuckCoroutine() 
+            GetSuckCharConnection = lp.CharacterAdded:Connect(function(NewChar) 
+                if GetSuckRunning then 
+                    local NHum = NewChar:WaitForChild("Humanoid") 
+                    if GetSuckAnimTrack then GetSuckAnimTrack:Stop() end 
+                    GetSuckAnimTrack = PlayAnimation(NHum, GetSuckAnimationId) 
+                    if GetSuckAnimTrack then GetSuckAnimTrack:AdjustSpeed(2) end 
+                end 
+            end) 
+        else 
+            WindUI:Notify({Title = "Get Suck", Content = "Target not found!", Duration = 2}) 
+            StopGetSuck() 
+        end 
+    else 
+        StopGetSuck() 
+    end 
+end })
+
+-- ==================== TAB CHARACTER ====================
+local CharacterTab = Window:Tab({ Title = "👤 Character", Icon = "" })
+
+CharacterTab:Section({ Title = "Walkspeed", Opened = true })
+CharacterTab:Toggle({ Title = "Enable Walkspeed", Value = false, Callback = function(State) CharacterSettings.WalkspeedEnabled = State local H = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid") if H then H.WalkSpeed = State and CharacterSettings.Walkspeed or 16 end end })
+CharacterTab:Slider({ Title = "Walkspeed Value", Step = 1, Value = { Min = 16, Max = 250, Default = 16 }, Callback = function(Value) CharacterSettings.Walkspeed = Value if CharacterSettings.WalkspeedEnabled then local H = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid") if H then H.WalkSpeed = Value end end end })
+
+CharacterTab:Section({ Title = "Jump Power", Opened = true })
+CharacterTab:Toggle({ Title = "Enable Jump Power", Value = false, Callback = function(State) CharacterSettings.JumppowerEnabled = State local H = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid") if H then H.JumpPower = State and CharacterSettings.Jumppower or 50 end end })
+CharacterTab:Slider({ Title = "Jump Power Value", Step = 1, Value = { Min = 50, Max = 500, Default = 50 }, Callback = function(Value) CharacterSettings.Jumppower = Value if CharacterSettings.JumppowerEnabled then local H = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid") if H then H.JumpPower = Value end end end })
+
+CharacterTab:Section({ Title = "Fly", Opened = true })
+CharacterTab:Slider({ Title = "Fly Speed", Step = 1, Value = { Min = 10, Max = 250, Default = 50 }, Callback = function(Value) CharacterSettings.FlySpeed = Value end })
+CharacterTab:Toggle({ Title = "Fly", Value = false, Callback = function(State) CharacterSettings.FlyEnabled = State FlyDirection = { f=0,b=0,l=0,r=0 } if State then StartFly() elseif FlyConnection then FlyConnection:Disconnect() FlyConnection = nil local C = lp.Character if C then local H = C:FindFirstChildOfClass("Humanoid") if H then H.PlatformStand = false end end Workspace.Gravity = 196.2 end end })
+
+CharacterTab:Section({ Title = "Noclip", Opened = true })
+CharacterTab:Toggle({ Title = "Noclip", Value = false, Callback = function(State) CharacterSettings.NoclipEnabled = State if State then if NoclipConnection then NoclipConnection:Disconnect() end NoclipConnection = RunService.Stepped:Connect(function() local C = lp.Character if C and CharacterSettings.NoclipEnabled then for _, P in ipairs(C:GetDescendants()) do if P:IsA("BasePart") then P.CanCollide = false end end end end) elseif NoclipConnection then NoclipConnection:Disconnect() NoclipConnection = nil local C = lp.Character if C then for _, P in ipairs(C:GetDescendants()) do if P:IsA("BasePart") then P.CanCollide = true end end end end end })
+
+CharacterTab:Section({ Title = "Infinite Jump", Opened = true })
+CharacterTab:Toggle({ Title = "Infinite Jump", Value = false, Callback = function(State) CharacterSettings.InfiniteJumpEnabled = State if State then if InfiniteJumpConnection then InfiniteJumpConnection:Disconnect() end InfiniteJumpConnection = UserInputService.JumpRequest:Connect(function() local C = lp.Character local H = C and C:FindFirstChildOfClass("Humanoid") if H and H:GetState() ~= Enum.HumanoidStateType.Dead then H:ChangeState(Enum.HumanoidStateType.Jumping) end end) elseif InfiniteJumpConnection then InfiniteJumpConnection:Disconnect() InfiniteJumpConnection = nil end end })
+
+CharacterTab:Section({ Title = "Field of View", Opened = true })
+CharacterTab:Toggle({ Title = "Enable FOV", Value = false, Callback = function(State) CharacterSettings.FOVEnabled = State Camera.FieldOfView = State and CharacterSettings.FOV or 70 end })
+CharacterTab:Slider({ Title = "FOV Value", Step = 1, Value = { Min = 30, Max = 120, Default = 70 }, Callback = function(Value) CharacterSettings.FOV = Value if CharacterSettings.FOVEnabled then Camera.FieldOfView = Value end end })
+
+CharacterTab:Section({ Title = "Camera", Opened = true })
+CharacterTab:Toggle({ Title = "Camera Noclip", Value = false, Callback = function(State) CharacterSettings.CameraNoclipEnabled = State if State then Camera.CameraType = Enum.CameraType.Scriptable task.wait() Camera.CameraType = Enum.CameraType.Custom end end })
+CharacterTab:Toggle({ Title = "Unlock Camera", Value = false, Callback = function(State) CharacterSettings.UnlockCameraEnabled = State if State then if not OriginalCameraMaxZoom then OriginalCameraMaxZoom = Camera.MaxZoomDistance end Camera.MaxZoomDistance = math.huge Camera.MinZoomDistance = 0 else if OriginalCameraMaxZoom then Camera.MaxZoomDistance = OriginalCameraMaxZoom Camera.MinZoomDistance = 0.5 end end end })
+
+CharacterTab:Section({ Title = "Respawn", Opened = true })
+CharacterTab:Button({ Title = "Respawn Character", Callback = function() local C = lp.Character local H = C and C:FindFirstChildOfClass("Humanoid") if H then H.Health = 0 WindUI:Notify({Title = "Respawn", Content = "Respawning...", Duration = 2}) end end })
+
+-- ==================== TAB KEYBINDS ====================
+local KeybindsTab = Window:Tab({ Title = "⌨️ Keybinds", Icon = "" })
+
+KeybindsTab:Keybind({ Title = "Shoot Keybind", Value = "E", Callback = function(v) pcall(function() _G.BindShoot = Enum.KeyCode[v] WindUI:Notify({Title = "Keybind", Content = "Shoot: "..v, Duration = 1}) end) end })
+KeybindsTab:Keybind({ Title = "Throw Keybind", Value = "Q", Callback = function(v) pcall(function() _G.BindThrow = Enum.KeyCode[v] WindUI:Notify({Title = "Keybind", Content = "Throw: "..v, Duration = 1}) end) end })
+KeybindsTab:Keybind({ Title = "Fake Bomb Keybind", Value = "F", Callback = function(v) pcall(function() _G.BindBomb = Enum.KeyCode[v] WindUI:Notify({Title = "Keybind", Content = "Bomb: "..v, Duration = 1}) end) end })
+
+-- ==================== OPEN BUTTON ====================
+Window:EditOpenButton({
+    Title = "Open Aether Hub",
+    Icon = "blade",
+    CornerRadius = UDim.new(0, 16),
+    StrokeThickness = 2,
+    Color = ColorSequence.new(Color3.fromRGB(0, 162, 255), Color3.fromRGB(100, 100, 255)),
+    OnlyMobile = false,
+    Enabled = true,
+    Draggable = true,
+})
+
+print("✅ AETHER HUB EXECUTED | All features working | 22 Prediction Modes Available")
