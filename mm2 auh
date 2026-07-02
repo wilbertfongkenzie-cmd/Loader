@@ -888,7 +888,7 @@ moveSpeed = 25
 AllBool = false
 local vu16 = vu14.Character
 local _ = vu13.LocalPlayer
-local vu18 = getOrCreatesusSound()
+
 function CleanupFling()
     print("\239\191\189\209\139\208\183\208\190\208\178 \209\132\209\131\208\189\208\186\209\134\208\184\208\184 CleanupFling()")
     if getgenv().FPDH then
@@ -2134,74 +2134,129 @@ vu34.teleport:Toggle({
             end
         end
     })
-    local vu269 = true
-    local vu270 = 22
-    local vu271 = game:GetService("ReplicatedStorage")
-    local vu272 = game:GetService("CoreGui")
-    function useBomb()
-        if vu269 then
-            vu269 = false
-            local v273 = vu14:FindFirstChild("Backpack")
-            local v274 = vu14.Character or vu14.CharacterAdded:Wait()
-            local v275 = v273:FindFirstChild("FakeBomb") or v274:FindFirstChild("FakeBomb")
-            if not v275 then
-                vu271.Remotes.Extras.ReplicateToy:InvokeServer("FakeBomb")
-                v275 = v273:WaitForChild("FakeBomb") or v274:WaitForChild("FakeBomb")
-            end
-            v275.Parent = v274
-            if v275:IsDescendantOf(v274) then
-                v274:FindFirstChildOfClass("Humanoid"):ChangeState(Enum.HumanoidStateType.Jumping)
-                v274.Humanoid.JumpPower = 53
-                v275.Remote:FireServer(v274.HumanoidRootPart.CFrame * CFrame.new(0, - 3, 0), 50)
-                task.wait(0.3)
-                v275.Parent = v273
-                v274.Humanoid.JumpPower = 51
-            end
-            local v276 = vu272:FindFirstChild("bomb")
-            if v276 then
-                v276:Destroy()
-            end
-            local v277 = Instance.new("ScreenGui", vu272)
-            v277.Name = "bomb"
-            local v278 = Instance.new("TextLabel")
-            v278.Size = UDim2.new(0, 200, 0, 50)
-            v278.Position = UDim2.new(0.5, - 100, 0, 50)
-            v278.BackgroundTransparency = 0.5
-            v278.TextColor3 = Color3.new(255, 0, 0)
-            v278.TextScaled = true
-            v278.Text = ""
-            v278.Parent = v277
-            local v279 = time()
-            local v280 = vu14.Character
-            while time() - v279 < vu270 do
-                if vu14.Character ~= v280 then
-                    v277:Destroy()
-                    vu269 = true
-                    return
-                end
-                v278.Text = "Cooldown: " .. vu270 - math.floor(time() - v279) .. "s"
-                task.wait(1)
-            end
-            v277:Destroy()
+-- ==================== BOMB CLUTCH SYSTEM ====================
+local vu269 = true
+local vu270 = 22  -- Default cooldown untuk FakeBomb
+local vu271 = game:GetService("ReplicatedStorage")
+local vu272 = game:GetService("CoreGui")
+
+-- DEFAULT BOMB TYPE
+getgenv().BombType = "FakeBomb"  -- Bisa "FakeBomb" atau "GoldBomb"
+
+function useBomb()
+    if vu269 then
+        vu269 = false
+        local v273 = vu14:FindFirstChild("Backpack")
+        local v274 = vu14.Character or vu14.CharacterAdded:Wait()
+        
+        -- AMBIL JENIS BOMB DARI getgenv()
+        local bombType = getgenv().BombType or "FakeBomb"
+        
+        -- TENTUKAN COOLDOWN BERDASARKAN JENIS BOMB
+        local bombCooldown = vu270
+        local jumpPower = 53
+        if bombType == "GoldBomb" then
+            bombCooldown = 2  -- GoldBomb cooldown 2 detik
+            jumpPower = 60    -- GoldBomb jump lebih tinggi
+        end
+        
+        -- CARI BOMB
+        local v275 = v273:FindFirstChild(bombType) or v274:FindFirstChild(bombType)
+        if not v275 then
+            vu271.Remotes.Extras.ReplicateToy:InvokeServer(bombType)
+            v275 = v273:WaitForChild(bombType) or v274:WaitForChild(bombType)
+        end
+        
+        -- PASTIKAN BOMB ADA
+        if not v275 then
             vu269 = true
+            sendnotification("Failed to get " .. bombType .. "!")
+            return
+        end
+        
+        v275.Parent = v274
+        if v275:IsDescendantOf(v274) then
+            v274:FindFirstChildOfClass("Humanoid"):ChangeState(Enum.HumanoidStateType.Jumping)
+            v274.Humanoid.JumpPower = jumpPower
+            v275.Remote:FireServer(v274.HumanoidRootPart.CFrame * CFrame.new(0, - 3, 0), 50)
+            task.wait(0.3)
+            v275.Parent = v273
+            v274.Humanoid.JumpPower = 51
+        end
+        
+        -- BERSIHKAN GUI COOLDOWN SEBELUMNYA
+        local v276 = vu272:FindFirstChild("bomb")
+        if v276 then
+            v276:Destroy()
+        end
+        
+        -- BUAT GUI COOLDOWN
+        local v277 = Instance.new("ScreenGui", vu272)
+        v277.Name = "bomb"
+        local v278 = Instance.new("TextLabel", v277)
+        v278.Size = UDim2.new(0, 200, 0, 50)
+        v278.Position = UDim2.new(0.5, - 100, 0, 50)
+        v278.BackgroundTransparency = 0.5
+        v278.TextColor3 = bombType == "GoldBomb" and Color3.new(1, 0.8, 0) or Color3.new(255, 0, 0)
+        v278.TextScaled = true
+        v278.Text = ""
+        
+        local v279 = time()
+        local v280 = vu14.Character
+        while time() - v279 < bombCooldown do
+            if vu14.Character ~= v280 then
+                v277:Destroy()
+                vu269 = true
+                return
+            end
+            local remaining = bombCooldown - math.floor(time() - v279)
+            v278.Text = bombType .. " Cooldown: " .. remaining .. "s"
+            task.wait(1)
+        end
+        v277:Destroy()
+        vu269 = true
+    end
+end
+
+-- KEYBIND CLUTCH BOMB (TETAP SAMA)
+vu34.combat:Keybind({
+    Title = "autoclutchbomb",
+    Value = "X",
+    Callback = function()
+        if autobomb then
+            useBomb()
         end
     end
-    vu34.combat:Keybind({
-        Title = "autoclutchbomb",
-        Value = "X",
-        Callback = function()
-            if autobomb then
-                useBomb()
-            end
-        end
-    })
-    vu34.combat:Toggle({
-        Title = "keybindclutch",
-        Value = false,
-        Callback = function(p281)
-            autobomb = p281
-        end
-    })
+})
+
+-- TOGGLE KEYBIND (TETAP SAMA)
+vu34.combat:Toggle({
+    Title = "keybindclutch",
+    Value = false,
+    Callback = function(p281)
+        autobomb = p281
+    end
+})
+
+-- ==================== DROPDOWN PILIH BOMB ====================
+vu34.combat:Dropdown({
+    Title = "Bomb Type",
+    Desc = "Choose which bomb to use for clutch",
+    Values = {
+        "FakeBomb",
+        "GoldBomb"
+    },
+    Value = "FakeBomb",
+    Callback = function(Selected)
+        getgenv().BombType = Selected
+        local cooldown = Selected == "GoldBomb" and "2s" or "22s"
+        WindUI:Notify({
+            Title = "Bomb Type",
+            Content = "Selected: " .. Selected .. " (Cooldown: " .. cooldown .. ")",
+            Duration = 3
+        })
+    end
+})
     local vu282 = game.Players.LocalPlayer
     local vu283 = nil
     local vu284 = nil
@@ -3329,71 +3384,7 @@ vu10.RenderStepped:Connect(function()
         vu451.Visible = false
     end
 end)
--- ==================== PREDIKSI DENGAN KOMPENSASI DELAY ====================
-local function GetKnifePredictionWithCompensation(targetChar, delay)
-    if not targetChar then return nil end
-    
-    local primaryPart = targetChar.PrimaryPart
-    if not primaryPart then return nil end
-    
-    local velocity = primaryPart.AssemblyLinearVelocity
-    local pos = primaryPart.Position
-    local humanoid = targetChar:FindFirstChildOfClass("Humanoid")
-    local moveDir = humanoid and humanoid.MoveDirection or Vector3.new()
-    
-    -- Kompensasi delay (semakin lama delay, semakin jauh prediksi)
-    local compensationFactor = 1 + (delay * 0.2)  -- Tambah 20% per detik delay
-    
-    if getgenv().KnifePredictionMode == "Default" then
-        local predTime = (getgenv().KnifePredictionTime or 0.16) * compensationFactor
-        return pos + Vector3.new(velocity.X, 0, velocity.Z) * predTime + moveDir * (delay * 0.3)
-        
-    elseif getgenv().KnifePredictionMode == "Extreme" then
-        local targetKey = tostring(primaryPart)
-        local lastVel = _lastVelocities[targetKey] or velocity
-        local accel = (velocity - lastVel) / 0.1
-        _lastVelocities[targetKey] = velocity
-        task.delay(2, function() _lastVelocities[targetKey] = nil end)
-        
-        local predTimeExtreme = 0.22 * compensationFactor
-        local predictedPos = pos + velocity * predTimeExtreme + 0.5 * accel * (predTimeExtreme ^ 2)
-        
-        if velocity.Magnitude > 0 then
-            local cross = velocity.Unit:Cross(moveDir)
-            predictedPos = predictedPos + moveDir * (2 + delay) + cross * (1.5 + delay)
-        end
-        return predictedPos
-        
-    elseif getgenv().KnifePredictionMode == "Legacy" then
-        local predTime = (16 / 100) * compensationFactor
-        return pos + Vector3.new(velocity.X, 0, velocity.Z) * predTime + moveDir * (delay * 0.3)
-    end
-    
-    return pos
-end
-vu10.RenderStepped:Connect(function()
-    if getgenv().KnifeAimEnabled then
-        vu448.Visible = getgenv().KnifeShowFOV
-        local target = GetKnifeTarget()
-        if target then
-            -- CEK APAKAH TARGET SUDAH MATI
-            local targetHumanoid = target.Character and target.Character:FindFirstChildOfClass("Humanoid")
-            if targetHumanoid and targetHumanoid.Health > 0 then
-                local pred = GetKnifePrediction()
-                if pred then
-                    getgenv().KnifeSilentAim.CurrentPrediction = pred
-                end
-            else
-                vu451.Visible = false
-            end
-        else
-            vu451.Visible = false
-        end
-    else
-        vu448.Visible = false
-        vu451.Visible = false
-    end
-end)
+
 vu34.combat:Toggle({
     Title = "togsilentaimKNIFE",
     Value = false,
