@@ -3277,11 +3277,7 @@ vu34.combat:Dropdown({
         end
     end
 end
--- ==================== FUNGSI PREDIKSI DENGAN 3 MODE ====================
-local _lastVelocities = {}  -- Untuk mode Extreme
-
--- ==================== HYBRID PREDICTION (LEGACY + EXTREME + NEW) ====================
--- Rating: ⭐⭐⭐⭐⭐ (5/5) - Akurat untuk semua skenario
+-- GANTI FUNGSI GetKnifePrediction DENGAN YANG INI
 function GetKnifePrediction()
     if getgenv().KnifeAimEnabled then
         local target = GetKnifeTarget()
@@ -3298,34 +3294,12 @@ function GetKnifePrediction()
                 local primaryPart = targetChar.PrimaryPart
                 if primaryPart then
                     local velocity = primaryPart.AssemblyLinearVelocity
-                    local pos = primaryPart.Position
-                    local moveDir = humanoid and humanoid.MoveDirection or Vector3.new()
+                    -- Gunakan vu447 / 100 sebagai prediction time (default 16/100 = 0.16)
+                    local predTime = vu447 / 100
+                    -- Prediksi hanya dengan velocity horizontal (X dan Z)
+                    local predictedPos = primaryPart.Position + Vector3.new(velocity.X, 0, velocity.Z) * predTime
                     
-                    -- ===== 1. LEGACY PREDICTION =====
-                    local predLegacy = pos + Vector3.new(velocity.X, 0, velocity.Z) * 0.16
-                    
-                    -- ===== 2. EXTREME PREDICTION =====
-                    local targetKey = tostring(primaryPart)
-                    local lastVel = _lastVelocities[targetKey] or velocity
-                    local accel = (velocity - lastVel) / 0.1
-                    _lastVelocities[targetKey] = velocity
-                    task.delay(2, function() _lastVelocities[targetKey] = nil end)
-                    
-                    local predExtreme = pos + velocity * 0.22 + 0.5 * accel * (0.22 ^ 2)
-                    if velocity.Magnitude > 0 then
-                        local cross = velocity.Unit:Cross(moveDir)
-                        predExtreme = predExtreme + moveDir * 2 + cross * 1.5
-                    end
-                    
-                    -- ===== 3. NEW PREDICTION =====
-                    local isJumping = humanoid and (humanoid.FloorMaterial == Enum.Material.Air) or false
-                    local jumpBonus = isJumping and Vector3.new(0, 7.5, 0) or Vector3.new(0, 0, 0)
-                    local predNew = pos + velocity * 0.4 + moveDir * 2.5 + jumpBonus
-                    
-                    -- ===== GABUNGAN =====
-                    local predictedPos = (predLegacy + predExtreme + predNew) / 3
-                    
-                    -- ===== SHOW PREDICTION DOT =====
+                    -- TAMPILKAN PREDICTION DOT
                     if getgenv().KnifeShowPrediction then
                         local screenPos, onScreen = vu8:WorldToViewportPoint(predictedPos)
                         if onScreen then
@@ -3344,6 +3318,17 @@ function GetKnifePrediction()
         return nil
     end
 end
+
+-- RENDER STEP CONNECTION (SUDAH BENAR)
+vu10.RenderStepped:Connect(function()
+    if getgenv().KnifeAimEnabled then
+        vu448.Visible = getgenv().KnifeShowFOV
+        getgenv().KnifeSilentAim.CurrentPrediction = GetKnifePrediction() or getgenv().KnifeSilentAim.CurrentPrediction
+    else
+        vu448.Visible = false
+        vu451.Visible = false
+    end
+end)
 -- ==================== PREDIKSI DENGAN KOMPENSASI DELAY ====================
 local function GetKnifePredictionWithCompensation(targetChar, delay)
     if not targetChar then return nil end
